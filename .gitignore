@@ -1,0 +1,61 @@
+# Maven build output
+target/
+*.class
+
+# Logs
+*.log
+logs/
+
+# Runtime/uploaded files
+upload/
+uploads/
+files/
+tmp/
+temp/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+application-local.yml
+application-dev-local.yml
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+out/
+
+# Eclipse / STS
+.classpath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Maven wrapper generated files
+.mvn/wrapper/maven-wrapper.jar
+
+# Test reports and coverage
+surefire-reports/
+failsafe-reports/
+jacoco.exec
+coverage/
+
+# Archive/package artifacts
+*.jar
+*.war
+*.ear
+
+# Keep source, docs and SQL files tracked
+!src/
+!docs/
+!sql/
