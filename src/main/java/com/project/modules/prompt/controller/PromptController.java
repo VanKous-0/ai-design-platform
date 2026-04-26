@@ -1,12 +1,17 @@
 package com.project.modules.prompt.controller;
 
 import com.project.common.result.Result;
+import com.project.modules.prompt.dto.PromptRenderRequest;
 import com.project.modules.prompt.service.PromptService;
 import com.project.modules.prompt.vo.PromptDetailVO;
 import com.project.modules.prompt.vo.PromptListVO;
+import com.project.modules.prompt.vo.PromptParameterVO;
+import com.project.modules.prompt.vo.PromptRenderVO;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,9 +37,9 @@ public class PromptController {
         return Result.success(promptService.listPrompts(stageId, category, keyword));
     }
 
-    @GetMapping("/{id}")
-    public Result<PromptDetailVO> getPrompt(@PathVariable Long id) {
-        return Result.success(promptService.getPromptDetail(id));
+    @GetMapping("/by-node")
+    public Result<List<PromptListVO>> listPromptsByNode(@RequestParam Long nodeId) {
+        return Result.success(promptService.listPromptsByNode(nodeId));
     }
 
     @GetMapping("/search")
@@ -48,6 +53,24 @@ public class PromptController {
             @RequestParam(required = false) Long toolId
     ) {
         return Result.success(promptService.recommendPrompts(stageId, toolId));
+    }
+
+    @GetMapping("/{id}")
+    public Result<PromptDetailVO> getPrompt(@PathVariable Long id) {
+        return Result.success(promptService.getPromptDetail(id));
+    }
+
+    @GetMapping("/{id}/parameters")
+    public Result<List<PromptParameterVO>> listParameters(@PathVariable Long id) {
+        return Result.success(promptService.listParameters(id));
+    }
+
+    @PostMapping("/{id}/render")
+    public Result<PromptRenderVO> renderPrompt(
+            @PathVariable Long id,
+            @Valid @RequestBody PromptRenderRequest request
+    ) {
+        return Result.success(promptService.renderPrompt(id, request));
     }
 
     @PostMapping("/{id}/copy")

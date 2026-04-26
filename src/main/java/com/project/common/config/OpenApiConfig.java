@@ -61,9 +61,12 @@ public class OpenApiConfig {
                     } else if (isPublicStageOperation(pathEntry.getKey(), operationEntry.getKey())
                             || isPublicToolOperation(pathEntry.getKey(), operationEntry.getKey())
                             || isPublicPromptOperation(pathEntry.getKey(), operationEntry.getKey())
+                            || isPublicWorkflowTemplateOperation(pathEntry.getKey(), operationEntry.getKey())
                             || isPublicCaseOperation(pathEntry.getKey(), operationEntry.getKey())
                             || isPublicReviewOperation(pathEntry.getKey(), operationEntry.getKey())
-                            || isPublicSiteOperation(pathEntry.getKey(), operationEntry.getKey())) {
+                            || isPublicSiteOperation(pathEntry.getKey(), operationEntry.getKey())
+                            || isPublicRatingOperation(pathEntry.getKey(), operationEntry.getKey())
+                            || isPublicStatisticsOperation(pathEntry.getKey(), operationEntry.getKey())) {
                         operation.setSecurity(new ArrayList<>());
                     } else {
                         operation.setSecurity(List.of(new SecurityRequirement().addList(AUTHORIZATION)));
@@ -88,14 +91,23 @@ public class OpenApiConfig {
                 || path.matches("^/api/tools/\\{[^/]+}/evaluations$"));
     }
 
+    private boolean isPublicWorkflowTemplateOperation(String path, PathItem.HttpMethod method) {
+        return PathItem.HttpMethod.GET.equals(method)
+                && ("/api/workflow-templates".equals(path)
+                || path.matches("^/api/workflow-templates/\\{[^/]+}$"));
+    }
+
     private boolean isPublicPromptOperation(String path, PathItem.HttpMethod method) {
         return (PathItem.HttpMethod.GET.equals(method)
                 && ("/api/prompts".equals(path)
                 || "/api/prompts/search".equals(path)
+                || "/api/prompts/by-node".equals(path)
                 || "/api/prompts/recommend".equals(path)
-                || path.matches("^/api/prompts/\\{[^/]+}$")))
+                || path.matches("^/api/prompts/\\{[^/]+}$")
+                || path.matches("^/api/prompts/\\{[^/]+}/parameters$")))
                 || (PathItem.HttpMethod.POST.equals(method)
-                && path.matches("^/api/prompts/\\{[^/]+}/copy$"));
+                && (path.matches("^/api/prompts/\\{[^/]+}/copy$")
+                || path.matches("^/api/prompts/\\{[^/]+}/render$")));
     }
 
     private boolean isPublicCaseOperation(String path, PathItem.HttpMethod method) {
@@ -121,5 +133,17 @@ public class OpenApiConfig {
                 || path.matches("^/api/site/contents/\\{[^/]+}$")
                 || "/api/awards".equals(path)
                 || path.matches("^/api/awards/\\{[^/]+}$"));
+    }
+
+    private boolean isPublicRatingOperation(String path, PathItem.HttpMethod method) {
+        return PathItem.HttpMethod.GET.equals(method)
+                && ("/api/ratings/tools/summary".equals(path)
+                || "/api/ratings/workflows/summary".equals(path));
+    }
+
+    private boolean isPublicStatisticsOperation(String path, PathItem.HttpMethod method) {
+        return PathItem.HttpMethod.POST.equals(method)
+                && ("/api/usage-events".equals(path)
+                || "/api/survey-feedback".equals(path));
     }
 }

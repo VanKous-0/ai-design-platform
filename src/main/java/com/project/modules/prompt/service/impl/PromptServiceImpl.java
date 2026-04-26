@@ -4,28 +4,41 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.project.common.exception.BusinessException;
 import com.project.modules.prompt.dto.PromptCreateRequest;
+import com.project.modules.prompt.dto.PromptParameterCreateRequest;
+import com.project.modules.prompt.dto.PromptParameterUpdateRequest;
+import com.project.modules.prompt.dto.PromptRenderRequest;
 import com.project.modules.prompt.dto.PromptToolSetRequest;
 import com.project.modules.prompt.dto.PromptUpdateRequest;
+import com.project.modules.prompt.entity.PromptParameter;
 import com.project.modules.prompt.entity.PromptTemplate;
 import com.project.modules.prompt.entity.PromptToolRel;
+import com.project.modules.prompt.entity.WorkflowNodePromptRel;
+import com.project.modules.prompt.mapper.PromptParameterMapper;
 import com.project.modules.prompt.mapper.PromptTemplateMapper;
 import com.project.modules.prompt.mapper.PromptToolRelMapper;
+import com.project.modules.prompt.mapper.WorkflowNodePromptRelMapper;
 import com.project.modules.prompt.service.PromptService;
 import com.project.modules.prompt.vo.PromptDetailVO;
 import com.project.modules.prompt.vo.PromptListVO;
+import com.project.modules.prompt.vo.PromptParameterVO;
+import com.project.modules.prompt.vo.PromptRenderVO;
 import com.project.modules.prompt.vo.PromptStageVO;
 import com.project.modules.prompt.vo.PromptToolVO;
 import com.project.modules.tool.entity.AiTool;
 import com.project.modules.tool.mapper.AiToolMapper;
 import com.project.modules.workflow.entity.WorkflowStage;
 import com.project.modules.workflow.mapper.WorkflowStageMapper;
+import com.project.modules.workflow.runtime.entity.WorkflowTemplateNode;
+import com.project.modules.workflow.runtime.mapper.WorkflowTemplateNodeMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -40,17 +53,26 @@ public class PromptServiceImpl implements PromptService {
 
     private final PromptTemplateMapper promptTemplateMapper;
     private final PromptToolRelMapper promptToolRelMapper;
+    private final PromptParameterMapper promptParameterMapper;
+    private final WorkflowNodePromptRelMapper workflowNodePromptRelMapper;
+    private final WorkflowTemplateNodeMapper workflowTemplateNodeMapper;
     private final WorkflowStageMapper workflowStageMapper;
     private final AiToolMapper aiToolMapper;
 
     public PromptServiceImpl(
             PromptTemplateMapper promptTemplateMapper,
             PromptToolRelMapper promptToolRelMapper,
+            PromptParameterMapper promptParameterMapper,
+            WorkflowNodePromptRelMapper workflowNodePromptRelMapper,
+            WorkflowTemplateNodeMapper workflowTemplateNodeMapper,
             WorkflowStageMapper workflowStageMapper,
             AiToolMapper aiToolMapper
     ) {
         this.promptTemplateMapper = promptTemplateMapper;
         this.promptToolRelMapper = promptToolRelMapper;
+        this.promptParameterMapper = promptParameterMapper;
+        this.workflowNodePromptRelMapper = workflowNodePromptRelMapper;
+        this.workflowTemplateNodeMapper = workflowTemplateNodeMapper;
         this.workflowStageMapper = workflowStageMapper;
         this.aiToolMapper = aiToolMapper;
     }
@@ -129,6 +151,78 @@ public class PromptServiceImpl implements PromptService {
     }
 
     @Override
+    public List<PromptListVO> listPromptsByNode(Long nodeId) {
+        ensureWorkflowNodeExists(nodeId);
+        List<Long> promptIds = workflowNodePromptRelMapper.selectList(new LambdaQueryWrapper<WorkflowNodePromptRel>()
+                        .eq(WorkflowNodePromptRel::getNodeId, nodeId)
+                        .orderByAsc(WorkflowNodePromptRel::getSortOrder)
+                        .orderByAsc(WorkflowNodePromptRel::getId))
+                .stream()
+                .map(WorkflowNodePromptRel::getPromptId)
+                .distinct()
+                .toList();
+        if (promptIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return promptTemplateMapper.selectList(enabledPromptQuery()
+                        .in(PromptTemplate::getId, promptIds)
+                        .orderByAsc(PromptTemplate::getSortOrder)
+                        .orderByAsc(PromptTemplate::getId))
+                .stream()
+                .map(this::toListVO)
+                .toList();
+    }
+
+    @Override
+    public List<PromptParameterVO> listParameters(Long promptId) {
+        getEnabledPromptEntity(promptId);
+        return promptParameterMapper.selectList(new LambdaQueryWrapper<PromptParameter>()
+                        .eq(PromptParameter::getPromptId, promptId)
+                        .orderByAsc(PromptParameter::getSortOrder)
+                        .orderByAsc(PromptParameter::getId))
+                .stream()
+                .map(this::toParameterVO)
+                .toList();
+    }
+
+    @Override
+    public PromptRenderVO renderPrompt(Long promptId, PromptRenderRequest request) {
+        PromptTemplate prompt = getEnabledPromptEntity(promptId);
+        List<PromptParameter> parameterDefinitions = promptParameterMapper.selectList(new LambdaQueryWrapper<PromptParameter>()
+                .eq(PromptParameter::getPromptId, promptId)
+                .orderByAsc(PromptParameter::getSortOrder)
+                .orderByAsc(PromptParameter::getId));
+        Map<String, String> values = request == null || request.getParameters() == null
+                ? Collections.emptyMap()
+                : request.getParameters();
+
+        String renderedContent = prompt.getContent();
+        List<String> missingRequiredParams = new ArrayList<>();
+        for (PromptParameter parameter : parameterDefinitions) {
+            String value = values.get(parameter.getParamKey());
+            if (!StringUtils.hasText(value)) {
+                value = parameter.getDefaultValue();
+            }
+            if (!StringUtils.hasText(value) && Objects.equals(parameter.getRequired(), 1)) {
+                missingRequiredParams.add(parameter.getParamKey());
+                continue;
+            }
+            if (value != null) {
+                renderedContent = renderedContent.replace("{" + parameter.getParamKey() + "}", value);
+            }
+        }
+        if (!missingRequiredParams.isEmpty()) {
+            throw new BusinessException("Missing required prompt parameters: " + String.join(",", missingRequiredParams));
+        }
+        return PromptRenderVO.builder()
+                .promptId(prompt.getId())
+                .title(prompt.getTitle())
+                .renderedContent(renderedContent)
+                .missingRequiredParams(missingRequiredParams)
+                .build();
+    }
+
+    @Override
     public void copyPrompt(Long id) {
         getEnabledPromptEntity(id);
         promptTemplateMapper.update(null, new LambdaUpdateWrapper<PromptTemplate>()
@@ -194,6 +288,38 @@ public class PromptServiceImpl implements PromptService {
             promptToolRelMapper.insert(rel);
         }
         return toolIds;
+    }
+
+    @Override
+    public PromptParameterVO createParameter(Long promptId, PromptParameterCreateRequest request) {
+        getPromptEntity(promptId);
+        ensureParameterKeyUnique(promptId, request.getParamKey(), null);
+        LocalDateTime now = LocalDateTime.now();
+        PromptParameter parameter = new PromptParameter();
+        fillParameter(parameter, promptId, request.getParamKey(), request.getParamName(), request.getParamType(),
+                request.getRequired(), request.getDefaultValue(), request.getPlaceholder(), request.getSortOrder());
+        parameter.setCreateTime(now);
+        parameter.setUpdateTime(now);
+        parameter.setIsDeleted(0);
+        promptParameterMapper.insert(parameter);
+        return toParameterVO(parameter);
+    }
+
+    @Override
+    public PromptParameterVO updateParameter(Long id, PromptParameterUpdateRequest request) {
+        PromptParameter parameter = getParameterEntity(id);
+        ensureParameterKeyUnique(parameter.getPromptId(), request.getParamKey(), id);
+        fillParameter(parameter, parameter.getPromptId(), request.getParamKey(), request.getParamName(), request.getParamType(),
+                request.getRequired(), request.getDefaultValue(), request.getPlaceholder(), request.getSortOrder());
+        parameter.setUpdateTime(LocalDateTime.now());
+        promptParameterMapper.updateById(parameter);
+        return toParameterVO(parameter);
+    }
+
+    @Override
+    public void deleteParameter(Long id) {
+        getParameterEntity(id);
+        promptParameterMapper.deleteById(id);
     }
 
     private LambdaQueryWrapper<PromptTemplate> enabledPromptQuery() {
@@ -285,6 +411,52 @@ public class PromptServiceImpl implements PromptService {
         }
     }
 
+    private void ensureWorkflowNodeExists(Long nodeId) {
+        WorkflowTemplateNode node = workflowTemplateNodeMapper.selectById(nodeId);
+        if (node == null || !Objects.equals(node.getStatus(), STATUS_ENABLED)) {
+            throw new BusinessException("Workflow node does not exist or is disabled");
+        }
+    }
+
+    private PromptParameter getParameterEntity(Long id) {
+        PromptParameter parameter = promptParameterMapper.selectById(id);
+        if (parameter == null) {
+            throw new BusinessException("Prompt parameter does not exist");
+        }
+        return parameter;
+    }
+
+    private void ensureParameterKeyUnique(Long promptId, String paramKey, Long excludeId) {
+        PromptParameter existing = promptParameterMapper.selectOne(new LambdaQueryWrapper<PromptParameter>()
+                .eq(PromptParameter::getPromptId, promptId)
+                .eq(PromptParameter::getParamKey, paramKey)
+                .last("limit 1"));
+        if (existing != null && !existing.getId().equals(excludeId)) {
+            throw new BusinessException("Prompt parameter key already exists");
+        }
+    }
+
+    private void fillParameter(
+            PromptParameter parameter,
+            Long promptId,
+            String paramKey,
+            String paramName,
+            String paramType,
+            Boolean required,
+            String defaultValue,
+            String placeholder,
+            Integer sortOrder
+    ) {
+        parameter.setPromptId(promptId);
+        parameter.setParamKey(paramKey);
+        parameter.setParamName(paramName);
+        parameter.setParamType(StringUtils.hasText(paramType) ? paramType : "text");
+        parameter.setRequired(Boolean.TRUE.equals(required) ? 1 : 0);
+        parameter.setDefaultValue(defaultValue);
+        parameter.setPlaceholder(placeholder);
+        parameter.setSortOrder(defaultIfNull(sortOrder, DEFAULT_SORT_ORDER));
+    }
+
     private List<Long> normalizeIds(List<Long> ids, String nullMessage) {
         if (ids == null) {
             return Collections.emptyList();
@@ -312,6 +484,22 @@ public class PromptServiceImpl implements PromptService {
                 .status(prompt.getStatus())
                 .createTime(prompt.getCreateTime())
                 .updateTime(prompt.getUpdateTime())
+                .build();
+    }
+
+    private PromptParameterVO toParameterVO(PromptParameter parameter) {
+        return PromptParameterVO.builder()
+                .id(parameter.getId())
+                .promptId(parameter.getPromptId())
+                .paramKey(parameter.getParamKey())
+                .paramName(parameter.getParamName())
+                .paramType(parameter.getParamType())
+                .required(Objects.equals(parameter.getRequired(), 1))
+                .defaultValue(parameter.getDefaultValue())
+                .placeholder(parameter.getPlaceholder())
+                .sortOrder(parameter.getSortOrder())
+                .createTime(parameter.getCreateTime())
+                .updateTime(parameter.getUpdateTime())
                 .build();
     }
 

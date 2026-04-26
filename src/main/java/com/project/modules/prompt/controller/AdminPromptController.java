@@ -2,10 +2,12 @@ package com.project.modules.prompt.controller;
 
 import com.project.common.result.Result;
 import com.project.modules.prompt.dto.PromptCreateRequest;
+import com.project.modules.prompt.dto.PromptParameterCreateRequest;
 import com.project.modules.prompt.dto.PromptToolSetRequest;
 import com.project.modules.prompt.dto.PromptUpdateRequest;
 import com.project.modules.prompt.service.PromptService;
 import com.project.modules.prompt.vo.PromptDetailVO;
+import com.project.modules.prompt.vo.PromptParameterVO;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -55,4 +57,13 @@ public class AdminPromptController {
     ) {
         return Result.success(promptService.setPromptTools(id, request));
     }
+
+    @PostMapping("/{id}/parameters")
+    public Result<PromptParameterVO> createParameter(
+            @PathVariable Long id,
+            @Valid @RequestBody PromptParameterCreateRequest request
+    ) {
+        return Result.success(promptService.createParameter(id, request));
+    }
+
 }
