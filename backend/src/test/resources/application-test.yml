@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:1/ai_design_platform_test?connectTimeout=1000&socketTimeout=1000
+    username: test
+    password:
+    hikari:
+      initialization-fail-timeout: -1
+  flyway:
+    enabled: false
+
+jwt:
+  header: Authorization
+  token-prefix: Bearer
+  secret: test-secret-that-is-longer-than-thirty-two-characters
+  expiration-seconds: 3600
+
+app:
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+
+logging:
+  level:
+    com.project: warn

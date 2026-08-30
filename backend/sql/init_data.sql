@@ -1,0 +1,5 @@
+-- Database: ai_design_platform
+-- Execute this file after schema.sql.
+--
+-- No fixed administrator password is stored in source control.
+-- Configure ADMIN_BOOTSTRAP_USERNAME and ADMIN_BOOTSTRAP_PASSWORD on first startup.
