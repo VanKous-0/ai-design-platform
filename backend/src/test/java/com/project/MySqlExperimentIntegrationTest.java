@@ -129,10 +129,13 @@ class MySqlExperimentIntegrationTest {
                 "P001", "A", "pilot-1");
         jdbcTemplate.update("""
                 INSERT INTO sys_user (username, password_hash, nickname, role, status, is_deleted)
-                VALUES (?, ?, ?, 'ADMIN', 1, 0), (?, ?, ?, 'USER', 1, 0)
+                VALUES (?, ?, ?, 'ADMIN', 1, 0),
+                       (?, ?, ?, 'USER', 1, 0),
+                       (?, ?, ?, 'USER', 1, 0)
                 """,
                 "phase1admin", passwordEncoder.encode("admin-password"), "Phase 1 Admin",
-                "phase1user", passwordEncoder.encode("user-password"), "Phase 1 User");
+                "phase1user", passwordEncoder.encode("user-password"), "Phase 1 User",
+                "phase11user", passwordEncoder.encode("user-password"), "Phase 1.1 User");
     }
 
     @Test
@@ -641,6 +644,236 @@ class MySqlExperimentIntegrationTest {
                 effectiveStyle.path("confidence").decimalValue().compareTo(new java.math.BigDecimal("1.000"))
         );
         org.junit.jupiter.api.Assertions.assertEquals(3, context.path("allSignals").size());
+    }
+
+    @Test
+    void behaviorEvidenceAndProfileSnapshotsRemainServerAuthoritative() throws Exception {
+        String adminToken = login("phase1admin", "admin-password");
+        String userToken = login("phase11user", "user-password");
+        Long userId = jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_user WHERE username = 'phase11user' AND is_deleted = 0",
+                Long.class
+        );
+        Long stageId = jdbcTemplate.queryForObject(
+                "SELECT id FROM workflow_stage WHERE status = 1 AND is_deleted = 0 ORDER BY id LIMIT 1",
+                Long.class
+        );
+
+        String promptResponse = mockMvc.perform(post("/api/admin/prompts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "stageId": %d,
+                                  "title": "Phase 1.1 explicit style prompt",
+                                  "code": "PHASE11_STYLE_PROMPT",
+                                  "category": "design_intent",
+                                  "content": "Create a deliberate design",
+                                  "sourceType": "RECONSTRUCTED",
+                                  "status": 1,
+                                  "preferenceHints": [
+                                    {"preferenceKey":"style","preferenceValue":"现代极简"}
+                                  ]
+                                }
+                                """.formatted(stageId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.preferenceHints[0].preferenceKey").value("style"))
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        long promptId = objectMapper.readTree(promptResponse).path("data").path("id").asLong();
+
+        String firstEvent = mockMvc.perform(post("/api/usage-events")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"eventType":"render_prompt","targetType":"prompt","targetId":%d}
+                                """.formatted(promptId)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        JsonNode firstEvidence = objectMapper.readTree(
+                objectMapper.readTree(firstEvent).path("data").path("preferenceEvidenceJson").asText()
+        );
+        org.junit.jupiter.api.Assertions.assertEquals("style", firstEvidence.get(0).path("preferenceKey").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("现代极简", firstEvidence.get(0).path("preferenceValue").asText());
+
+        java.util.Map<String, Object> behavior = behaviorSignal(userId, "style");
+        org.junit.jupiter.api.Assertions.assertEquals("现代极简", behavior.get("preference_value"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, ((Number) behavior.get("evidence_count")).intValue());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                0,
+                ((java.math.BigDecimal) behavior.get("confidence")).compareTo(new java.math.BigDecimal("0.300"))
+        );
+
+        mockMvc.perform(post("/api/usage-events")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"eventType":"render_prompt","targetType":"prompt","targetId":%d}
+                                """.formatted(promptId)))
+                .andExpect(status().isOk());
+        behavior = behaviorSignal(userId, "style");
+        org.junit.jupiter.api.Assertions.assertEquals(2, ((Number) behavior.get("evidence_count")).intValue());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                0,
+                ((java.math.BigDecimal) behavior.get("confidence")).compareTo(new java.math.BigDecimal("0.400"))
+        );
+
+        mockMvc.perform(put("/api/admin/prompts/" + promptId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "stageId": %d,
+                                  "title": "Phase 1.1 explicit style prompt",
+                                  "code": "PHASE11_STYLE_PROMPT",
+                                  "category": "design_intent",
+                                  "content": "Create a deliberate design",
+                                  "sourceType": "RECONSTRUCTED",
+                                  "status": 1,
+                                  "preferenceHints": [
+                                    {"preferenceKey":"style","preferenceValue":"新中式"}
+                                  ]
+                                }
+                                """.formatted(stageId)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/usage-events")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"eventType":"render_prompt","targetType":"prompt","targetId":%d}
+                                """.formatted(promptId)))
+                .andExpect(status().isOk());
+        behavior = behaviorSignal(userId, "style");
+        org.junit.jupiter.api.Assertions.assertEquals("新中式", behavior.get("preference_value"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, ((Number) behavior.get("evidence_count")).intValue());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                0,
+                ((java.math.BigDecimal) behavior.get("confidence")).compareTo(new java.math.BigDecimal("0.300"))
+        );
+
+        mockMvc.perform(post("/api/usage-events")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"anonymousId":"phase11-anon","eventType":"render_prompt",
+                                 "targetType":"prompt","targetId":%d}
+                                """.formatted(promptId)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/usage-events")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"eventType":"copy_prompt","targetType":"prompt","targetId":%d}
+                                """.formatted(promptId)))
+                .andExpect(status().isOk());
+        behavior = behaviorSignal(userId, "style");
+        org.junit.jupiter.api.Assertions.assertEquals(1, ((Number) behavior.get("evidence_count")).intValue());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                1,
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM usage_event WHERE anonymous_id = 'phase11-anon'",
+                        Integer.class
+                )
+        );
+        org.junit.jupiter.api.Assertions.assertNull(jdbcTemplate.queryForObject(
+                "SELECT preference_evidence_json FROM usage_event WHERE event_type = 'copy_prompt' AND user_id = ? ORDER BY id DESC LIMIT 1",
+                String.class,
+                userId
+        ));
+
+        Long templateId = jdbcTemplate.queryForObject(
+                "SELECT id FROM workflow_template WHERE status = 1 AND is_deleted = 0 ORDER BY id LIMIT 1",
+                Long.class
+        );
+        JsonNode instance = objectMapper.readTree(mockMvc.perform(post("/api/workflow-instances")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"templateId\":" + templateId + ",\"title\":\"Phase 1.1 profile history\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(
+                        java.nio.charset.StandardCharsets.UTF_8
+                )).path("data");
+        long instanceId = instance.path("id").asLong();
+        long nodeId = instance.path("currentNodeId").asLong();
+
+        JsonNode iterationA = objectMapper.readTree(mockMvc.perform(post(
+                                "/api/workflow-instances/" + instanceId + "/steps/" + nodeId + "/iterations")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "profileContextSnapshot", "{\"style\":\"工业风\"}",
+                                "outputContent", "Profile snapshot v1"
+                        ))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(
+                        java.nio.charset.StandardCharsets.UTF_8
+                )).path("data");
+        JsonNode snapshotA = objectMapper.readTree(iterationA.path("profileContextSnapshot").asText());
+        org.junit.jupiter.api.Assertions.assertEquals(1, snapshotA.path("schemaVersion").asInt());
+        org.junit.jupiter.api.Assertions.assertEquals("新中式", snapshotPreference(snapshotA, "style")
+                .path("preferenceValue").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("BEHAVIOR_INFERRED", snapshotPreference(snapshotA, "style")
+                .path("source").asText());
+
+        postPreferenceSignal(
+                "/api/user/preference-signals",
+                userToken,
+                "style",
+                "现代极简",
+                "USER_DECLARED",
+                null
+        );
+        JsonNode iterationB = objectMapper.readTree(mockMvc.perform(post(
+                                "/api/workflow-instances/" + instanceId + "/steps/" + nodeId + "/iterations")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "profileContextSnapshot", "{\"style\":\"包豪斯\"}",
+                                "outputContent", "Profile snapshot v2"
+                        ))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(
+                        java.nio.charset.StandardCharsets.UTF_8
+                )).path("data");
+        JsonNode snapshotB = objectMapper.readTree(iterationB.path("profileContextSnapshot").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("现代极简", snapshotPreference(snapshotB, "style")
+                .path("preferenceValue").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("USER_DECLARED", snapshotPreference(snapshotB, "style")
+                .path("source").asText());
+
+        JsonNode storedSnapshotA = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT profile_context_snapshot FROM workflow_step_iteration WHERE id = ?",
+                String.class,
+                iterationA.path("id").asLong()
+        ));
+        org.junit.jupiter.api.Assertions.assertEquals("新中式", snapshotPreference(storedSnapshotA, "style")
+                .path("preferenceValue").asText());
+
+        String contextResponse = mockMvc.perform(get("/api/user/preference-context")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        JsonNode effective = objectMapper.readTree(contextResponse).path("data").path("effectiveSignals");
+        JsonNode effectiveStyle = java.util.stream.StreamSupport.stream(effective.spliterator(), false)
+                .filter(signal -> "style".equals(signal.path("preferenceKey").asText()))
+                .findFirst()
+                .orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals("现代极简", effectiveStyle.path("preferenceValue").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("USER_DECLARED", effectiveStyle.path("source").asText());
+    }
+
+    private java.util.Map<String, Object> behaviorSignal(Long userId, String preferenceKey) {
+        return jdbcTemplate.queryForMap("""
+                SELECT preference_value, confidence, evidence_count
+                FROM user_preference_signal
+                WHERE user_id = ? AND preference_key = ?
+                  AND source = 'BEHAVIOR_INFERRED' AND is_deleted = 0
+                """, userId, preferenceKey);
+    }
+
+    private JsonNode snapshotPreference(JsonNode snapshot, String preferenceKey) {
+        return java.util.stream.StreamSupport.stream(snapshot.path("preferences").spliterator(), false)
+                .filter(preference -> preferenceKey.equals(preference.path("preferenceKey").asText()))
+                .findFirst()
+                .orElseThrow();
     }
 
     private JsonNode postPreferenceSignal(
