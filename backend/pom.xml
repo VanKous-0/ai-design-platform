@@ -25,6 +25,8 @@
         <mybatis-plus.version>3.5.9</mybatis-plus.version>
         <knife4j.version>4.5.0</knife4j.version>
         <jjwt.version>0.12.6</jjwt.version>
+        <!-- 1.21.4 backports compatibility with recent Docker Engine API floors. -->
+        <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
     <dependencies>
