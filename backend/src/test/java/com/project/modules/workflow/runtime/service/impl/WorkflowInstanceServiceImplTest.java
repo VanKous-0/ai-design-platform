@@ -20,6 +20,9 @@ import com.project.modules.workflow.runtime.vo.WorkflowStepCompleteVO;
 import com.project.modules.workflow.runtime.vo.WorkflowStepIterationVO;
 import com.project.modules.tool.entity.AiTool;
 import com.project.modules.tool.mapper.AiToolMapper;
+import com.project.modules.prompt.service.PromptRevisionService;
+import com.project.modules.prompt.entity.PromptRevision;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,6 +60,9 @@ class WorkflowInstanceServiceImplTest {
     @Mock
     private AiToolMapper aiToolMapper;
 
+    @Mock
+    private PromptRevisionService promptRevisionService;
+
     private WorkflowInstanceServiceImpl service;
 
     @BeforeEach
@@ -67,7 +73,9 @@ class WorkflowInstanceServiceImplTest {
                 instanceMapper,
                 stepRecordMapper,
                 stepIterationMapper,
-                aiToolMapper
+                aiToolMapper,
+                promptRevisionService,
+                new ObjectMapper()
         );
     }
 
@@ -202,6 +210,61 @@ class WorkflowInstanceServiceImplTest {
         assertThrows(
                 BusinessException.class,
                 () -> service.createStepIteration(7L, 1000L, 101L, request)
+        );
+    }
+
+    @Test
+    void savesExactPromptRevisionAndRenderedSnapshots() {
+        WorkflowInstance instance = runningInstance();
+        WorkflowTemplateNode node = node(101L, 10L, "场地分析", 1);
+        WorkflowStepIterationCreateRequest request = new WorkflowStepIterationCreateRequest();
+        request.setPromptId(20L);
+        request.setPromptRevisionId(200L);
+        request.setPromptContent("Design in modern minimal style");
+        request.setProfileContextSnapshot("{\"style\":\"modern minimal\"}");
+        request.setOutputContent("Analysis result");
+        PromptRevision revision = new PromptRevision();
+        revision.setId(200L);
+        revision.setPromptId(20L);
+
+        when(instanceMapper.selectOne(any())).thenReturn(instance);
+        when(nodeMapper.selectOne(any())).thenReturn(node);
+        when(promptRevisionService.requireRevision(20L, 200L)).thenReturn(revision);
+        when(stepIterationMapper.selectOne(any())).thenReturn(null);
+        doAnswer(invocation -> {
+            WorkflowStepIteration iteration = invocation.getArgument(0);
+            iteration.setId(2000L);
+            return 1;
+        }).when(stepIterationMapper).insert(any(WorkflowStepIteration.class));
+
+        WorkflowStepIterationVO result = service.createStepIteration(7L, 1000L, 101L, request);
+
+        assertEquals(20L, result.getPromptId());
+        assertEquals(200L, result.getPromptRevisionId());
+        assertEquals("Design in modern minimal style", result.getPromptContent());
+        assertEquals("{\"style\":\"modern minimal\"}", result.getProfileContextSnapshot());
+    }
+
+    @Test
+    void rejectsPartialPromptReferenceAndInvalidProfileSnapshot() {
+        WorkflowStepIterationCreateRequest partialReference = new WorkflowStepIterationCreateRequest();
+        partialReference.setPromptId(20L);
+        partialReference.setOutputContent("Analysis result");
+        when(instanceMapper.selectOne(any())).thenReturn(runningInstance());
+        when(nodeMapper.selectOne(any())).thenReturn(node(101L, 10L, "场地分析", 1));
+
+        assertThrows(
+                BusinessException.class,
+                () -> service.createStepIteration(7L, 1000L, 101L, partialReference)
+        );
+
+        WorkflowStepIterationCreateRequest invalidSnapshot = new WorkflowStepIterationCreateRequest();
+        invalidSnapshot.setOutputContent("Analysis result");
+        invalidSnapshot.setProfileContextSnapshot("[]");
+
+        assertThrows(
+                BusinessException.class,
+                () -> service.createStepIteration(7L, 1000L, 101L, invalidSnapshot)
         );
     }
 

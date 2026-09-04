@@ -34,7 +34,8 @@ public class ExperimentExportServiceImpl implements ExperimentExportService {
     private static final List<String> ITERATION_HEADERS = List.of(
             "iteration_id", "instance_id", "user_id", "experiment_code", "experiment_group", "experiment_batch",
             "template_id", "template_name", "node_id", "node_name", "iteration_no", "tool_id", "tool_name",
-            "prompt_content", "output_content", "result_url", "effect_score", "accuracy_score",
+            "prompt_id", "prompt_revision_id", "prompt_content", "profile_context_snapshot",
+            "output_content", "result_url", "effect_score", "accuracy_score",
             "controllability_score", "usability_score", "average_score", "improvement_note", "selected",
             "create_time", "update_time"
     );
@@ -173,7 +174,10 @@ public class ExperimentExportServiceImpl implements ExperimentExportService {
                     i.iteration_no,
                     i.tool_id,
                     t.name AS tool_name,
+                    i.prompt_id,
+                    i.prompt_revision_id,
                     i.prompt_content,
+                    i.profile_context_snapshot,
                     i.output_content,
                     i.result_url,
                     i.effect_score,

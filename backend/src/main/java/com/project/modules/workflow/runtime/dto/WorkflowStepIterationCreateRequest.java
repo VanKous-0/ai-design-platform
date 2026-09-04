@@ -10,8 +10,15 @@ public class WorkflowStepIterationCreateRequest {
 
     private Long toolId;
 
+    private Long promptId;
+
+    private Long promptRevisionId;
+
     @Size(max = 10000, message = "Prompt content cannot exceed 10000 characters")
     private String promptContent;
+
+    @Size(max = 10000, message = "Profile context snapshot cannot exceed 10000 characters")
+    private String profileContextSnapshot;
 
     @Size(max = 20000, message = "Output content cannot exceed 20000 characters")
     private String outputContent;

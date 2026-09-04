@@ -25,7 +25,13 @@ public class WorkflowStepIteration {
 
     private Long toolId;
 
+    private Long promptId;
+
+    private Long promptRevisionId;
+
     private String promptContent;
+
+    private String profileContextSnapshot;
 
     private String outputContent;
 

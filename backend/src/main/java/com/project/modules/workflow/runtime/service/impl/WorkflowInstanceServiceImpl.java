@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.common.exception.BusinessException;
 import com.project.common.result.PageResult;
 import com.project.common.util.PageSupport;
@@ -29,6 +31,7 @@ import com.project.modules.workflow.runtime.vo.WorkflowStepCompleteVO;
 import com.project.modules.workflow.runtime.vo.WorkflowStepIterationVO;
 import com.project.modules.workflow.runtime.vo.WorkflowStepRecordVO;
 import com.project.modules.workflow.runtime.vo.WorkflowTemplateNodeVO;
+import com.project.modules.prompt.service.PromptRevisionService;
 import com.project.modules.tool.entity.AiTool;
 import com.project.modules.tool.mapper.AiToolMapper;
 import org.springframework.stereotype.Service;
@@ -60,6 +63,8 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
     private final WorkflowStepRecordMapper stepRecordMapper;
     private final WorkflowStepIterationMapper stepIterationMapper;
     private final AiToolMapper aiToolMapper;
+    private final PromptRevisionService promptRevisionService;
+    private final ObjectMapper objectMapper;
 
     public WorkflowInstanceServiceImpl(
             WorkflowTemplateMapper templateMapper,
@@ -67,7 +72,9 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
             WorkflowInstanceMapper instanceMapper,
             WorkflowStepRecordMapper stepRecordMapper,
             WorkflowStepIterationMapper stepIterationMapper,
-            AiToolMapper aiToolMapper
+            AiToolMapper aiToolMapper,
+            PromptRevisionService promptRevisionService,
+            ObjectMapper objectMapper
     ) {
         this.templateMapper = templateMapper;
         this.nodeMapper = nodeMapper;
@@ -75,6 +82,8 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
         this.stepRecordMapper = stepRecordMapper;
         this.stepIterationMapper = stepIterationMapper;
         this.aiToolMapper = aiToolMapper;
+        this.promptRevisionService = promptRevisionService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -219,6 +228,8 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
         WorkflowInstance instance = getOwnedInstance(userId, instanceId);
         ensureNodeBelongsToTemplate(instance.getTemplateId(), nodeId);
         AiTool tool = getEnabledTool(request.getToolId());
+        validatePromptHistory(request);
+        validateProfileContextSnapshot(request.getProfileContextSnapshot());
         if (!hasText(request.getOutputContent()) && !hasText(request.getResultUrl())) {
             throw new BusinessException("Output content or result URL is required");
         }
@@ -242,7 +253,10 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
         iteration.setUserId(userId);
         iteration.setIterationNo(latest == null ? 1 : latest.getIterationNo() + 1);
         iteration.setToolId(request.getToolId());
+        iteration.setPromptId(request.getPromptId());
+        iteration.setPromptRevisionId(request.getPromptRevisionId());
         iteration.setPromptContent(request.getPromptContent());
+        iteration.setProfileContextSnapshot(request.getProfileContextSnapshot());
         iteration.setOutputContent(request.getOutputContent());
         iteration.setResultUrl(request.getResultUrl());
         iteration.setEffectScore(request.getEffectScore());
@@ -358,6 +372,34 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
         return toolId == null ? null : aiToolMapper.selectById(toolId);
     }
 
+    private void validatePromptHistory(WorkflowStepIterationCreateRequest request) {
+        boolean hasPromptId = request.getPromptId() != null;
+        boolean hasRevisionId = request.getPromptRevisionId() != null;
+        if (hasPromptId != hasRevisionId) {
+            throw new BusinessException("Prompt ID and prompt revision ID must be provided together");
+        }
+        if (!hasPromptId) {
+            return;
+        }
+        if (!hasText(request.getPromptContent())) {
+            throw new BusinessException("Rendered prompt snapshot is required for a versioned prompt");
+        }
+        promptRevisionService.requireRevision(request.getPromptId(), request.getPromptRevisionId());
+    }
+
+    private void validateProfileContextSnapshot(String snapshot) {
+        if (!hasText(snapshot)) {
+            return;
+        }
+        try {
+            if (!objectMapper.readTree(snapshot).isObject()) {
+                throw new BusinessException("Profile context snapshot must be a JSON object");
+            }
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException("Profile context snapshot must be valid JSON");
+        }
+    }
+
     private void clearSelectedIteration(Long instanceId, Long nodeId) {
         stepIterationMapper.update(null, new UpdateWrapper<WorkflowStepIteration>()
                 .eq("instance_id", instanceId)
@@ -387,7 +429,10 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
                 .iterationNo(iteration.getIterationNo())
                 .toolId(iteration.getToolId())
                 .toolName(tool == null ? null : tool.getName())
+                .promptId(iteration.getPromptId())
+                .promptRevisionId(iteration.getPromptRevisionId())
                 .promptContent(iteration.getPromptContent())
+                .profileContextSnapshot(iteration.getProfileContextSnapshot())
                 .outputContent(iteration.getOutputContent())
                 .resultUrl(iteration.getResultUrl())
                 .effectScore(iteration.getEffectScore())

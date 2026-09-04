@@ -22,7 +22,13 @@ public class WorkflowStepIterationVO {
 
     private String toolName;
 
+    private Long promptId;
+
+    private Long promptRevisionId;
+
     private String promptContent;
+
+    private String profileContextSnapshot;
 
     private String outputContent;
 
