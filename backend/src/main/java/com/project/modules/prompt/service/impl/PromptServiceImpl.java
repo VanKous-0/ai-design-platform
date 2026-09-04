@@ -9,14 +9,17 @@ import com.project.common.util.PageSupport;
 import com.project.modules.prompt.dto.PromptCreateRequest;
 import com.project.modules.prompt.dto.PromptParameterCreateRequest;
 import com.project.modules.prompt.dto.PromptParameterUpdateRequest;
+import com.project.modules.prompt.dto.PromptPreferenceHintRequest;
 import com.project.modules.prompt.dto.PromptRenderRequest;
 import com.project.modules.prompt.dto.PromptToolSetRequest;
 import com.project.modules.prompt.dto.PromptUpdateRequest;
 import com.project.modules.prompt.entity.PromptParameter;
+import com.project.modules.prompt.entity.PromptPreferenceHint;
 import com.project.modules.prompt.entity.PromptTemplate;
 import com.project.modules.prompt.entity.PromptToolRel;
 import com.project.modules.prompt.entity.WorkflowNodePromptRel;
 import com.project.modules.prompt.mapper.PromptParameterMapper;
+import com.project.modules.prompt.mapper.PromptPreferenceHintMapper;
 import com.project.modules.prompt.mapper.PromptTemplateMapper;
 import com.project.modules.prompt.mapper.PromptToolRelMapper;
 import com.project.modules.prompt.mapper.WorkflowNodePromptRelMapper;
@@ -25,6 +28,7 @@ import com.project.modules.prompt.service.PromptRevisionService;
 import com.project.modules.prompt.vo.PromptDetailVO;
 import com.project.modules.prompt.vo.PromptListVO;
 import com.project.modules.prompt.vo.PromptParameterVO;
+import com.project.modules.prompt.vo.PromptPreferenceHintVO;
 import com.project.modules.prompt.vo.PromptRenderVO;
 import com.project.modules.prompt.vo.PromptRevisionVO;
 import com.project.modules.prompt.vo.PromptStageVO;
@@ -59,6 +63,7 @@ public class PromptServiceImpl implements PromptService {
     private final PromptTemplateMapper promptTemplateMapper;
     private final PromptToolRelMapper promptToolRelMapper;
     private final PromptParameterMapper promptParameterMapper;
+    private final PromptPreferenceHintMapper promptPreferenceHintMapper;
     private final WorkflowNodePromptRelMapper workflowNodePromptRelMapper;
     private final WorkflowTemplateNodeMapper workflowTemplateNodeMapper;
     private final WorkflowStageMapper workflowStageMapper;
@@ -69,6 +74,7 @@ public class PromptServiceImpl implements PromptService {
             PromptTemplateMapper promptTemplateMapper,
             PromptToolRelMapper promptToolRelMapper,
             PromptParameterMapper promptParameterMapper,
+            PromptPreferenceHintMapper promptPreferenceHintMapper,
             WorkflowNodePromptRelMapper workflowNodePromptRelMapper,
             WorkflowTemplateNodeMapper workflowTemplateNodeMapper,
             WorkflowStageMapper workflowStageMapper,
@@ -78,6 +84,7 @@ public class PromptServiceImpl implements PromptService {
         this.promptTemplateMapper = promptTemplateMapper;
         this.promptToolRelMapper = promptToolRelMapper;
         this.promptParameterMapper = promptParameterMapper;
+        this.promptPreferenceHintMapper = promptPreferenceHintMapper;
         this.workflowNodePromptRelMapper = workflowNodePromptRelMapper;
         this.workflowTemplateNodeMapper = workflowTemplateNodeMapper;
         this.workflowStageMapper = workflowStageMapper;
@@ -279,6 +286,7 @@ public class PromptServiceImpl implements PromptService {
         prompt.setIsDeleted(0);
         promptTemplateMapper.insert(prompt);
         replaceParameters(prompt.getId(), request.getParameters());
+        replacePreferenceHints(prompt.getId(), request.getPreferenceHints());
         promptRevisionService.createRevision(prompt, createdBy);
         return toDetailVO(prompt);
     }
@@ -299,6 +307,9 @@ public class PromptServiceImpl implements PromptService {
         promptTemplateMapper.updateById(prompt);
         if (request.getParameters() != null) {
             replaceParameters(prompt.getId(), request.getParameters());
+        }
+        if (request.getPreferenceHints() != null) {
+            replacePreferenceHints(prompt.getId(), request.getPreferenceHints());
         }
         promptRevisionService.createRevision(prompt, createdBy);
         return toDetailVO(prompt);
@@ -534,6 +545,43 @@ public class PromptServiceImpl implements PromptService {
         requests.forEach(request -> insertParameter(promptId, request, now));
     }
 
+    private void replacePreferenceHints(Long promptId, List<PromptPreferenceHintRequest> requests) {
+        if (requests == null) {
+            return;
+        }
+        List<String> keys = requests.stream()
+                .map(request -> normalizePreferenceKey(request.getPreferenceKey()))
+                .toList();
+        if (keys.stream().distinct().count() != keys.size()) {
+            throw new BusinessException("Prompt preference hint keys must be unique");
+        }
+
+        promptPreferenceHintMapper.hardDeleteByPromptId(promptId);
+        LocalDateTime now = LocalDateTime.now();
+        for (int index = 0; index < requests.size(); index++) {
+            PromptPreferenceHintRequest request = requests.get(index);
+            PromptPreferenceHint hint = new PromptPreferenceHint();
+            hint.setPromptId(promptId);
+            hint.setPreferenceKey(keys.get(index));
+            hint.setPreferenceValue(request.getPreferenceValue().trim());
+            hint.setCreateTime(now);
+            hint.setUpdateTime(now);
+            hint.setIsDeleted(0);
+            promptPreferenceHintMapper.insert(hint);
+        }
+    }
+
+    private String normalizePreferenceKey(String preferenceKey) {
+        if (!StringUtils.hasText(preferenceKey)) {
+            throw new BusinessException("Preference key cannot be blank");
+        }
+        String normalized = preferenceKey.trim();
+        if (!normalized.matches("[a-z0-9][a-z0-9_.-]{0,79}")) {
+            throw new BusinessException("Preference key must be a stable lowercase identifier");
+        }
+        return normalized;
+    }
+
     private PromptParameter insertParameter(
             Long promptId,
             PromptParameterCreateRequest request,
@@ -626,6 +674,7 @@ public class PromptServiceImpl implements PromptService {
                 .status(prompt.getStatus())
                 .stage(loadStage(prompt.getStageId()))
                 .tools(loadTools(prompt.getId()))
+                .preferenceHints(loadPreferenceHints(prompt.getId()))
                 .createTime(prompt.getCreateTime())
                 .updateTime(prompt.getUpdateTime())
                 .build();
@@ -664,6 +713,20 @@ public class PromptServiceImpl implements PromptService {
                         .code(tool.getCode())
                         .officialUrl(tool.getOfficialUrl())
                         .logoUrl(tool.getLogoUrl())
+                        .build())
+                .toList();
+    }
+
+    private List<PromptPreferenceHintVO> loadPreferenceHints(Long promptId) {
+        return promptPreferenceHintMapper.selectList(new LambdaQueryWrapper<PromptPreferenceHint>()
+                        .eq(PromptPreferenceHint::getPromptId, promptId)
+                        .orderByAsc(PromptPreferenceHint::getPreferenceKey)
+                        .orderByAsc(PromptPreferenceHint::getId))
+                .stream()
+                .map(hint -> PromptPreferenceHintVO.builder()
+                        .id(hint.getId())
+                        .preferenceKey(hint.getPreferenceKey())
+                        .preferenceValue(hint.getPreferenceValue())
                         .build())
                 .toList();
     }

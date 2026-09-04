@@ -29,5 +29,7 @@ public class UsageEventVO {
 
     private String extraJson;
 
+    private String preferenceEvidenceJson;
+
     private LocalDateTime createTime;
 }

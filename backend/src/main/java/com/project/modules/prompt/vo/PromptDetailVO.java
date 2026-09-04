@@ -56,6 +56,8 @@ public class PromptDetailVO {
 
     private List<PromptToolVO> tools;
 
+    private List<PromptPreferenceHintVO> preferenceHints;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

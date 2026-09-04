@@ -23,7 +23,7 @@ public class ExperimentExportServiceImpl implements ExperimentExportService {
     private static final List<String> EVENT_HEADERS = List.of(
             "event_id", "user_id", "experiment_code", "experiment_group", "experiment_batch", "anonymous_id",
             "event_type", "target_type", "target_id", "page_url", "stay_duration", "input_summary",
-            "extra_json", "event_time"
+            "extra_json", "preference_evidence_json", "event_time"
     );
     private static final List<String> WORKFLOW_HEADERS = List.of(
             "record_id", "instance_id", "user_id", "experiment_code", "experiment_group", "experiment_batch",
@@ -100,6 +100,7 @@ public class ExperimentExportServiceImpl implements ExperimentExportService {
                     e.stay_duration,
                     e.input_summary,
                     e.extra_json,
+                    e.preference_evidence_json,
                     e.create_time AS event_time
                 FROM usage_event e
                 LEFT JOIN sys_user u ON u.id = e.user_id AND u.is_deleted = 0

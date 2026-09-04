@@ -1,4 +1,4 @@
-package com.project.modules.statistics.entity;
+package com.project.modules.prompt.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -9,31 +9,17 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("usage_event")
-public class UsageEvent {
+@TableName("prompt_preference_hint")
+public class PromptPreferenceHint {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private Long userId;
+    private Long promptId;
 
-    private String anonymousId;
+    private String preferenceKey;
 
-    private String eventType;
-
-    private String targetType;
-
-    private Long targetId;
-
-    private String pageUrl;
-
-    private Integer stayDuration;
-
-    private String inputSummary;
-
-    private String extraJson;
-
-    private String preferenceEvidenceJson;
+    private String preferenceValue;
 
     private LocalDateTime createTime;
 

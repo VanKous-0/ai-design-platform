@@ -57,4 +57,8 @@ public class PromptCreateRequest {
     @Valid
     @Size(max = 50, message = "Prompt cannot define more than 50 parameters")
     private List<PromptParameterCreateRequest> parameters;
+
+    @Valid
+    @Size(max = 20, message = "Prompt cannot define more than 20 preference hints")
+    private List<PromptPreferenceHintRequest> preferenceHints;
 }

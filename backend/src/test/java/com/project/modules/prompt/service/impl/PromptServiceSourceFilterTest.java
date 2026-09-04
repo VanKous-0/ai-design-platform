@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.project.modules.prompt.entity.PromptTemplate;
 import com.project.modules.prompt.mapper.PromptParameterMapper;
+import com.project.modules.prompt.mapper.PromptPreferenceHintMapper;
 import com.project.modules.prompt.mapper.PromptTemplateMapper;
 import com.project.modules.prompt.mapper.PromptToolRelMapper;
 import com.project.modules.prompt.mapper.WorkflowNodePromptRelMapper;
@@ -37,6 +38,8 @@ class PromptServiceSourceFilterTest {
     @Mock
     private PromptParameterMapper promptParameterMapper;
     @Mock
+    private PromptPreferenceHintMapper promptPreferenceHintMapper;
+    @Mock
     private WorkflowNodePromptRelMapper workflowNodePromptRelMapper;
     @Mock
     private WorkflowTemplateNodeMapper workflowTemplateNodeMapper;
@@ -59,6 +62,7 @@ class PromptServiceSourceFilterTest {
                 promptTemplateMapper,
                 promptToolRelMapper,
                 promptParameterMapper,
+                promptPreferenceHintMapper,
                 workflowNodePromptRelMapper,
                 workflowTemplateNodeMapper,
                 workflowStageMapper,

@@ -160,7 +160,7 @@ class MySqlExperimentIntegrationTest {
                 Integer.class
         );
 
-        org.junit.jupiter.api.Assertions.assertEquals("35", latestVersion);
+        org.junit.jupiter.api.Assertions.assertEquals("36", latestVersion);
         org.junit.jupiter.api.Assertions.assertTrue(revisionCount >= promptCount);
         org.junit.jupiter.api.Assertions.assertEquals(0, invalidCurrentRevisionCount);
     }
@@ -185,7 +185,10 @@ class MySqlExperimentIntegrationTest {
                     """
                     SELECT COUNT(*) FROM information_schema.tables
                     WHERE table_schema = 'ai_design_platform_fresh'
-                      AND table_name IN ('prompt_template', 'prompt_revision', 'user_preference_signal', 'workflow_step_iteration')
+                      AND table_name IN (
+                          'prompt_template', 'prompt_revision', 'prompt_preference_hint',
+                          'user_preference_signal', 'workflow_step_iteration'
+                      )
                     """,
                     Integer.class
             );
@@ -200,8 +203,8 @@ class MySqlExperimentIntegrationTest {
                     Integer.class
             );
 
-            org.junit.jupiter.api.Assertions.assertEquals("35", latestVersion);
-            org.junit.jupiter.api.Assertions.assertEquals(4, requiredTables);
+            org.junit.jupiter.api.Assertions.assertEquals("36", latestVersion);
+            org.junit.jupiter.api.Assertions.assertEquals(5, requiredTables);
             org.junit.jupiter.api.Assertions.assertEquals(0, invalidCurrentRevisionCount);
         }
     }
@@ -266,7 +269,7 @@ class MySqlExperimentIntegrationTest {
                 .andExpect(status().isOk());
 
         Long eventCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM usage_event WHERE event_type = 'render_prompt'",
+                "SELECT COUNT(*) FROM usage_event WHERE event_type = 'render_prompt' AND page_url = '/workflow'",
                 Long.class
         );
         org.junit.jupiter.api.Assertions.assertEquals(1L, eventCount);
