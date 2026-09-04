@@ -27,7 +27,9 @@ $env:JWT_SECRET = "<at-least-32-random-characters>"
 mvn spring-boot:run
 ```
 
-Initialize the database in the order documented in `docs/数据库脚本执行顺序.md`.
+Create the empty `ai_design_platform` database and start the application. Flyway
+is the only runtime schema source and applies the consolidated V1 baseline plus
+all later migrations. Do not manually run files under `sql/` for new databases.
 
 ## Verification
 
@@ -78,9 +80,13 @@ The backend does not call external AI APIs. Authenticated users can record and c
 
 An iteration records the tool, prompt, output or result URL, effect, accuracy, controllability, usability, and the next improvement note. Only one iteration per workflow node is selected as the final result.
 
-## Flyway transition
+## Flyway schema source of truth
 
-Flyway is enabled by default. Existing non-empty databases are baselined at version 26, then versioned migrations are applied. Empty databases must first run the 26 historical scripts in `docs/数据库脚本执行顺序.md`; Docker Compose performs that initialization automatically.
+Flyway is enabled by default. Existing non-empty databases that predate Flyway
+are baselined at version 26 and upgraded through V27 and later migrations. Empty
+databases start with `V1__legacy_schema_and_seed_baseline.sql`; Docker Compose
+does not execute the legacy `sql/` bootstrap path. The old SQL files are retained
+only as audited historical inputs and are not runtime dependencies.
 
 ## Real project cases
 

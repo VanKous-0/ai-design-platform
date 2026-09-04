@@ -1,3 +1,7 @@
+-- LEGACY ONLY.
+-- Docker Compose no longer mounts or executes this file. Flyway is the only
+-- runtime schema source. This historical bootstrap list remains for auditing
+-- databases created before the Flyway convergence in V1/V35.
 SOURCE /project-sql/schema.sql;
 SOURCE /project-sql/init_data.sql;
 SOURCE /project-sql/workflow_schema.sql;

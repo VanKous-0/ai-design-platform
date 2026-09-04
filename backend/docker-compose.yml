@@ -11,8 +11,6 @@ services:
       - --collation-server=utf8mb4_0900_ai_ci
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./deploy/mysql/00_initialize.sql:/docker-entrypoint-initdb.d/00_initialize.sql:ro
-      - ./sql:/project-sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
