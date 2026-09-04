@@ -6,6 +6,7 @@ import com.project.common.exception.BusinessException;
 import com.project.modules.profile.dto.UserDesignPreferenceUpdateRequest;
 import com.project.modules.profile.dto.UserProfileUpdateRequest;
 import com.project.modules.profile.dto.UserRecentParameterCreateRequest;
+import com.project.modules.profile.dto.UserPreferenceSignalUpsertRequest;
 import com.project.modules.profile.entity.UserDesignPreference;
 import com.project.modules.profile.entity.UserProfile;
 import com.project.modules.profile.entity.UserRecentParameter;
@@ -13,12 +14,16 @@ import com.project.modules.profile.mapper.UserDesignPreferenceMapper;
 import com.project.modules.profile.mapper.UserProfileMapper;
 import com.project.modules.profile.mapper.UserRecentParameterMapper;
 import com.project.modules.profile.service.UserProfileService;
+import com.project.modules.profile.service.UserPreferenceSignalService;
 import com.project.modules.profile.vo.UserDesignPreferenceVO;
 import com.project.modules.profile.vo.UserProfileVO;
 import com.project.modules.profile.vo.UserRecentParameterVO;
+import com.project.modules.profile.vo.UserPreferenceContextVO;
+import com.project.modules.profile.vo.UserPreferenceSignalVO;
 import com.project.modules.tool.entity.AiTool;
 import com.project.modules.tool.mapper.AiToolMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,17 +35,20 @@ public class UserProfileServiceImpl implements UserProfileService {
     private final UserDesignPreferenceMapper preferenceMapper;
     private final UserRecentParameterMapper recentParameterMapper;
     private final AiToolMapper aiToolMapper;
+    private final UserPreferenceSignalService preferenceSignalService;
 
     public UserProfileServiceImpl(
             UserProfileMapper userProfileMapper,
             UserDesignPreferenceMapper preferenceMapper,
             UserRecentParameterMapper recentParameterMapper,
-            AiToolMapper aiToolMapper
+            AiToolMapper aiToolMapper,
+            UserPreferenceSignalService preferenceSignalService
     ) {
         this.userProfileMapper = userProfileMapper;
         this.preferenceMapper = preferenceMapper;
         this.recentParameterMapper = recentParameterMapper;
         this.aiToolMapper = aiToolMapper;
+        this.preferenceSignalService = preferenceSignalService;
     }
 
     @Override
@@ -82,6 +90,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public UserDesignPreferenceVO updatePreference(Long userId, UserDesignPreferenceUpdateRequest request) {
         if (request.getDefaultToolId() != null) {
             ensureToolExists(request.getDefaultToolId());
@@ -106,7 +115,31 @@ public class UserProfileServiceImpl implements UserProfileService {
         } else {
             preferenceMapper.updateById(preference);
         }
+        preferenceSignalService.replaceUserDeclared(userId, "project_type", request.getPreferredProjectType());
+        preferenceSignalService.replaceUserDeclared(userId, "style", request.getPreferredStyle());
+        preferenceSignalService.replaceUserDeclared(userId, "site_scale", request.getPreferredSiteScale());
+        preferenceSignalService.replaceUserDeclared(userId, "target_user", request.getPreferredTargetUser());
+        preferenceSignalService.replaceUserDeclared(
+                userId,
+                "default_tool_id",
+                request.getDefaultToolId() == null ? null : request.getDefaultToolId().toString()
+        );
         return toPreferenceVO(preference);
+    }
+
+    @Override
+    public UserPreferenceSignalVO upsertPreferenceSignal(Long userId, UserPreferenceSignalUpsertRequest request) {
+        return preferenceSignalService.upsertUserDeclared(userId, request);
+    }
+
+    @Override
+    public UserPreferenceContextVO getPreferenceContext(Long userId) {
+        return UserPreferenceContextVO.builder()
+                .userId(userId)
+                .legacyPreference(getPreference(userId))
+                .effectiveSignals(preferenceSignalService.listEffective(userId))
+                .allSignals(preferenceSignalService.listAll(userId))
+                .build();
     }
 
     @Override

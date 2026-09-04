@@ -4,10 +4,13 @@ import com.project.common.result.Result;
 import com.project.modules.profile.dto.UserDesignPreferenceUpdateRequest;
 import com.project.modules.profile.dto.UserProfileUpdateRequest;
 import com.project.modules.profile.dto.UserRecentParameterCreateRequest;
+import com.project.modules.profile.dto.UserPreferenceSignalUpsertRequest;
 import com.project.modules.profile.service.UserProfileService;
 import com.project.modules.profile.vo.UserDesignPreferenceVO;
 import com.project.modules.profile.vo.UserProfileVO;
 import com.project.modules.profile.vo.UserRecentParameterVO;
+import com.project.modules.profile.vo.UserPreferenceContextVO;
+import com.project.modules.profile.vo.UserPreferenceSignalVO;
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -55,6 +58,19 @@ public class UserProfileController {
             @Valid @RequestBody UserDesignPreferenceUpdateRequest request
     ) {
         return Result.success(userProfileService.updatePreference(currentUserId(authentication), request));
+    }
+
+    @PostMapping("/preference-signals")
+    public Result<UserPreferenceSignalVO> upsertPreferenceSignal(
+            Authentication authentication,
+            @Valid @RequestBody UserPreferenceSignalUpsertRequest request
+    ) {
+        return Result.success(userProfileService.upsertPreferenceSignal(currentUserId(authentication), request));
+    }
+
+    @GetMapping("/preference-context")
+    public Result<UserPreferenceContextVO> getPreferenceContext(Authentication authentication) {
+        return Result.success(userProfileService.getPreferenceContext(currentUserId(authentication)));
     }
 
     @GetMapping("/recent-parameters")
