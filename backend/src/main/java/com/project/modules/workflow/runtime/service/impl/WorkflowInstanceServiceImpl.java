@@ -4,11 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.common.exception.BusinessException;
 import com.project.common.result.PageResult;
 import com.project.common.util.PageSupport;
+import com.project.modules.profile.service.UserPreferenceContextService;
 import com.project.modules.workflow.runtime.dto.WorkflowInstanceCreateRequest;
 import com.project.modules.workflow.runtime.dto.WorkflowStepCompleteRequest;
 import com.project.modules.workflow.runtime.dto.WorkflowStepIterationCreateRequest;
@@ -64,7 +63,7 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
     private final WorkflowStepIterationMapper stepIterationMapper;
     private final AiToolMapper aiToolMapper;
     private final PromptRevisionService promptRevisionService;
-    private final ObjectMapper objectMapper;
+    private final UserPreferenceContextService preferenceContextService;
 
     public WorkflowInstanceServiceImpl(
             WorkflowTemplateMapper templateMapper,
@@ -74,7 +73,7 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
             WorkflowStepIterationMapper stepIterationMapper,
             AiToolMapper aiToolMapper,
             PromptRevisionService promptRevisionService,
-            ObjectMapper objectMapper
+            UserPreferenceContextService preferenceContextService
     ) {
         this.templateMapper = templateMapper;
         this.nodeMapper = nodeMapper;
@@ -83,7 +82,7 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
         this.stepIterationMapper = stepIterationMapper;
         this.aiToolMapper = aiToolMapper;
         this.promptRevisionService = promptRevisionService;
-        this.objectMapper = objectMapper;
+        this.preferenceContextService = preferenceContextService;
     }
 
     @Override
@@ -229,7 +228,6 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
         ensureNodeBelongsToTemplate(instance.getTemplateId(), nodeId);
         AiTool tool = getEnabledTool(request.getToolId());
         validatePromptHistory(request);
-        validateProfileContextSnapshot(request.getProfileContextSnapshot());
         if (!hasText(request.getOutputContent()) && !hasText(request.getResultUrl())) {
             throw new BusinessException("Output content or result URL is required");
         }
@@ -256,7 +254,7 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
         iteration.setPromptId(request.getPromptId());
         iteration.setPromptRevisionId(request.getPromptRevisionId());
         iteration.setPromptContent(request.getPromptContent());
-        iteration.setProfileContextSnapshot(request.getProfileContextSnapshot());
+        iteration.setProfileContextSnapshot(preferenceContextService.buildContextSnapshot(userId));
         iteration.setOutputContent(request.getOutputContent());
         iteration.setResultUrl(request.getResultUrl());
         iteration.setEffectScore(request.getEffectScore());
@@ -385,19 +383,6 @@ public class WorkflowInstanceServiceImpl implements WorkflowInstanceService {
             throw new BusinessException("Rendered prompt snapshot is required for a versioned prompt");
         }
         promptRevisionService.requireRevision(request.getPromptId(), request.getPromptRevisionId());
-    }
-
-    private void validateProfileContextSnapshot(String snapshot) {
-        if (!hasText(snapshot)) {
-            return;
-        }
-        try {
-            if (!objectMapper.readTree(snapshot).isObject()) {
-                throw new BusinessException("Profile context snapshot must be a JSON object");
-            }
-        } catch (JsonProcessingException ex) {
-            throw new BusinessException("Profile context snapshot must be valid JSON");
-        }
     }
 
     private void clearSelectedIteration(Long instanceId, Long nodeId) {

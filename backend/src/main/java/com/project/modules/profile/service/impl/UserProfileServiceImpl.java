@@ -14,6 +14,7 @@ import com.project.modules.profile.mapper.UserDesignPreferenceMapper;
 import com.project.modules.profile.mapper.UserProfileMapper;
 import com.project.modules.profile.mapper.UserRecentParameterMapper;
 import com.project.modules.profile.service.UserProfileService;
+import com.project.modules.profile.service.UserPreferenceContextService;
 import com.project.modules.profile.service.UserPreferenceSignalService;
 import com.project.modules.profile.vo.UserDesignPreferenceVO;
 import com.project.modules.profile.vo.UserProfileVO;
@@ -36,19 +37,22 @@ public class UserProfileServiceImpl implements UserProfileService {
     private final UserRecentParameterMapper recentParameterMapper;
     private final AiToolMapper aiToolMapper;
     private final UserPreferenceSignalService preferenceSignalService;
+    private final UserPreferenceContextService preferenceContextService;
 
     public UserProfileServiceImpl(
             UserProfileMapper userProfileMapper,
             UserDesignPreferenceMapper preferenceMapper,
             UserRecentParameterMapper recentParameterMapper,
             AiToolMapper aiToolMapper,
-            UserPreferenceSignalService preferenceSignalService
+            UserPreferenceSignalService preferenceSignalService,
+            UserPreferenceContextService preferenceContextService
     ) {
         this.userProfileMapper = userProfileMapper;
         this.preferenceMapper = preferenceMapper;
         this.recentParameterMapper = recentParameterMapper;
         this.aiToolMapper = aiToolMapper;
         this.preferenceSignalService = preferenceSignalService;
+        this.preferenceContextService = preferenceContextService;
     }
 
     @Override
@@ -137,7 +141,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         return UserPreferenceContextVO.builder()
                 .userId(userId)
                 .legacyPreference(getPreference(userId))
-                .effectiveSignals(preferenceSignalService.listEffective(userId))
+                .effectiveSignals(preferenceContextService.getEffectiveContext(userId))
                 .allSignals(preferenceSignalService.listAll(userId))
                 .build();
     }

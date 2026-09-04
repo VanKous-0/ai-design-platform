@@ -22,7 +22,7 @@ import com.project.modules.tool.entity.AiTool;
 import com.project.modules.tool.mapper.AiToolMapper;
 import com.project.modules.prompt.service.PromptRevisionService;
 import com.project.modules.prompt.entity.PromptRevision;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.modules.profile.service.UserPreferenceContextService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -63,6 +63,9 @@ class WorkflowInstanceServiceImplTest {
     @Mock
     private PromptRevisionService promptRevisionService;
 
+    @Mock
+    private UserPreferenceContextService preferenceContextService;
+
     private WorkflowInstanceServiceImpl service;
 
     @BeforeEach
@@ -75,8 +78,10 @@ class WorkflowInstanceServiceImplTest {
                 stepIterationMapper,
                 aiToolMapper,
                 promptRevisionService,
-                new ObjectMapper()
+                preferenceContextService
         );
+        org.mockito.Mockito.lenient().when(preferenceContextService.buildContextSnapshot(any()))
+                .thenReturn("{\"schemaVersion\":1,\"preferences\":[]}");
     }
 
     @Test
@@ -221,7 +226,7 @@ class WorkflowInstanceServiceImplTest {
         request.setPromptId(20L);
         request.setPromptRevisionId(200L);
         request.setPromptContent("Design in modern minimal style");
-        request.setProfileContextSnapshot("{\"style\":\"modern minimal\"}");
+        request.setProfileContextSnapshot("{\"style\":\"forged by client\"}");
         request.setOutputContent("Analysis result");
         PromptRevision revision = new PromptRevision();
         revision.setId(200L);
@@ -242,11 +247,14 @@ class WorkflowInstanceServiceImplTest {
         assertEquals(20L, result.getPromptId());
         assertEquals(200L, result.getPromptRevisionId());
         assertEquals("Design in modern minimal style", result.getPromptContent());
-        assertEquals("{\"style\":\"modern minimal\"}", result.getProfileContextSnapshot());
+        assertEquals(
+                "{\"schemaVersion\":1,\"preferences\":[]}",
+                result.getProfileContextSnapshot()
+        );
     }
 
     @Test
-    void rejectsPartialPromptReferenceAndInvalidProfileSnapshot() {
+    void rejectsPartialPromptReferenceButIgnoresDeprecatedClientSnapshot() {
         WorkflowStepIterationCreateRequest partialReference = new WorkflowStepIterationCreateRequest();
         partialReference.setPromptId(20L);
         partialReference.setOutputContent("Analysis result");
@@ -261,10 +269,13 @@ class WorkflowInstanceServiceImplTest {
         WorkflowStepIterationCreateRequest invalidSnapshot = new WorkflowStepIterationCreateRequest();
         invalidSnapshot.setOutputContent("Analysis result");
         invalidSnapshot.setProfileContextSnapshot("[]");
+        when(stepIterationMapper.selectOne(any())).thenReturn(null);
 
-        assertThrows(
-                BusinessException.class,
-                () -> service.createStepIteration(7L, 1000L, 101L, invalidSnapshot)
+        WorkflowStepIterationVO result = service.createStepIteration(7L, 1000L, 101L, invalidSnapshot);
+
+        assertEquals(
+                "{\"schemaVersion\":1,\"preferences\":[]}",
+                result.getProfileContextSnapshot()
         );
     }
 
