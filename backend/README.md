@@ -70,6 +70,14 @@ Allowed usage event types are:
 `login`, `view_tool`, `select_workflow_template`, `render_prompt`, `copy_prompt`,
 `complete_workflow_step`, `submit_tool_rating`, `submit_workflow_rating`, and `submit_survey`.
 
+Profile provenance has three separate layers: `usage_event` stores raw behavior,
+`user_preference_signal` stores the current aggregate, and each Workflow
+iteration stores the effective execution-time profile snapshot. Only an
+authenticated `render_prompt` event for a Prompt with administrator-declared
+`preferenceHints` updates `BEHAVIOR_INFERRED`; anonymous, copy, view, login, and
+unmapped events remain statistics-only. The event insert and aggregate update
+share one transaction.
+
 ## External AI result iterations
 
 The backend does not call external AI APIs. Authenticated users can record and compare results produced in external tools:
@@ -78,7 +86,10 @@ The backend does not call external AI APIs. Authenticated users can record and c
 - `GET /api/workflow-instances/{id}/steps/{nodeId}/iterations`
 - `PUT /api/workflow-instances/{id}/steps/{nodeId}/iterations/{iterationId}/select`
 
-An iteration records the tool, prompt, output or result URL, effect, accuracy, controllability, usability, and the next improvement note. Only one iteration per workflow node is selected as the final result.
+An iteration records the tool, prompt, server-built profile context snapshot,
+output or result URL, effect, accuracy, controllability, usability, and the next
+improvement note. The deprecated client profile snapshot field is ignored. Only
+one iteration per workflow node is selected as the final result.
 
 ## Flyway schema source of truth
 

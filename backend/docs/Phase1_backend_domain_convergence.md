@@ -32,18 +32,32 @@ under concurrency without requiring elevated trigger privileges for migrations.
 
 `workflow_step_iteration.prompt_content` remains the rendered prompt snapshot.
 When a library prompt is used, `prompt_id` and `prompt_revision_id` must be
-provided together and the revision must belong to that prompt. An optional JSON
-object stores the profile context used for the iteration.
+provided together and the revision must belong to that prompt. As of Phase 1.1,
+the profile context snapshot is always built by the server from the authenticated
+user's effective preferences. The deprecated client field is ignored.
 
 `user_design_preference` and its API remain available. A new
-`user_preference_signal` model stores source, scope, sentiment, confidence,
-evidence count, provenance summary, and last observation time. User declarations
-always have confidence 1.0 and outrank Agent and behavior inference during
-consolidation. One behavior observation starts at 0.3; repeated matching evidence
-increases confidence by 0.1 up to 0.8. The profile-owner endpoint accepts only
-`USER_DECLARED`; trusted inferred updates use the existing admin boundary at
+`user_preference_signal` model stores the **current aggregated preference state**:
+source, scope, sentiment, confidence, evidence count, provenance summary, and
+last observation time. It is not an observation log. The append-oriented
+`usage_event` table is the source for raw behavioral facts. Phase 1.1 stores the
+server-resolved Prompt preference evidence on each qualifying event so the
+current aggregate can be explained without duplicating the event history in the
+profile table. User declarations always have confidence 1.0 and outrank Agent
+and behavior inference during consolidation. One behavior observation starts at
+0.3; repeated matching evidence increases confidence by 0.1 up to 0.8. The
+profile-owner endpoint accepts only `USER_DECLARED`; trusted inferred updates
+use the existing admin boundary at
 `POST /api/admin/users/{userId}/preference-signals`, so clients cannot relabel
 their own input as Agent or behavior evidence.
+
+The provenance layers are therefore:
+
+```text
+UsageEvent                  = raw, append-oriented behavioral fact
+UserPreferenceSignal       = current aggregated preference state
+ProfileContextSnapshot     = immutable context actually used by one execution
+```
 
 Flyway now owns both paths: V1 is the immutable consolidated pre-Flyway baseline
 for empty databases, while populated legacy databases baseline at version 26 and
