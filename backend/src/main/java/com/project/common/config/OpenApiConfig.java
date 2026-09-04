@@ -104,7 +104,9 @@ public class OpenApiConfig {
                 || "/api/prompts/by-node".equals(path)
                 || "/api/prompts/recommend".equals(path)
                 || path.matches("^/api/prompts/\\{[^/]+}$")
-                || path.matches("^/api/prompts/\\{[^/]+}/parameters$")))
+                || path.matches("^/api/prompts/\\{[^/]+}/parameters$")
+                || path.matches("^/api/prompts/\\{[^/]+}/revisions$")
+                || path.matches("^/api/prompts/\\{[^/]+}/revisions/\\{[^/]+}$")))
                 || (PathItem.HttpMethod.POST.equals(method)
                 && (path.matches("^/api/prompts/\\{[^/]+}/copy$")
                 || path.matches("^/api/prompts/\\{[^/]+}/render$")));

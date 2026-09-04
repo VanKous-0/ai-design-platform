@@ -21,10 +21,12 @@ import com.project.modules.prompt.mapper.PromptTemplateMapper;
 import com.project.modules.prompt.mapper.PromptToolRelMapper;
 import com.project.modules.prompt.mapper.WorkflowNodePromptRelMapper;
 import com.project.modules.prompt.service.PromptService;
+import com.project.modules.prompt.service.PromptRevisionService;
 import com.project.modules.prompt.vo.PromptDetailVO;
 import com.project.modules.prompt.vo.PromptListVO;
 import com.project.modules.prompt.vo.PromptParameterVO;
 import com.project.modules.prompt.vo.PromptRenderVO;
+import com.project.modules.prompt.vo.PromptRevisionVO;
 import com.project.modules.prompt.vo.PromptStageVO;
 import com.project.modules.prompt.vo.PromptToolVO;
 import com.project.modules.tool.entity.AiTool;
@@ -38,7 +40,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +63,7 @@ public class PromptServiceImpl implements PromptService {
     private final WorkflowTemplateNodeMapper workflowTemplateNodeMapper;
     private final WorkflowStageMapper workflowStageMapper;
     private final AiToolMapper aiToolMapper;
+    private final PromptRevisionService promptRevisionService;
 
     public PromptServiceImpl(
             PromptTemplateMapper promptTemplateMapper,
@@ -70,7 +72,8 @@ public class PromptServiceImpl implements PromptService {
             WorkflowNodePromptRelMapper workflowNodePromptRelMapper,
             WorkflowTemplateNodeMapper workflowTemplateNodeMapper,
             WorkflowStageMapper workflowStageMapper,
-            AiToolMapper aiToolMapper
+            AiToolMapper aiToolMapper,
+            PromptRevisionService promptRevisionService
     ) {
         this.promptTemplateMapper = promptTemplateMapper;
         this.promptToolRelMapper = promptToolRelMapper;
@@ -79,6 +82,7 @@ public class PromptServiceImpl implements PromptService {
         this.workflowTemplateNodeMapper = workflowTemplateNodeMapper;
         this.workflowStageMapper = workflowStageMapper;
         this.aiToolMapper = aiToolMapper;
+        this.promptRevisionService = promptRevisionService;
     }
 
     @Override
@@ -227,38 +231,23 @@ public class PromptServiceImpl implements PromptService {
     @Override
     public PromptRenderVO renderPrompt(Long promptId, PromptRenderRequest request) {
         PromptTemplate prompt = getEnabledPromptEntity(promptId);
-        List<PromptParameter> parameterDefinitions = promptParameterMapper.selectList(new LambdaQueryWrapper<PromptParameter>()
-                .eq(PromptParameter::getPromptId, promptId)
-                .orderByAsc(PromptParameter::getSortOrder)
-                .orderByAsc(PromptParameter::getId));
         Map<String, String> values = request == null || request.getParameters() == null
                 ? Collections.emptyMap()
                 : request.getParameters();
+        Long revisionId = request == null ? null : request.getPromptRevisionId();
+        return promptRevisionService.render(prompt, revisionId, values);
+    }
 
-        String renderedContent = prompt.getContent();
-        List<String> missingRequiredParams = new ArrayList<>();
-        for (PromptParameter parameter : parameterDefinitions) {
-            String value = values.get(parameter.getParamKey());
-            if (!StringUtils.hasText(value)) {
-                value = parameter.getDefaultValue();
-            }
-            if (!StringUtils.hasText(value) && Objects.equals(parameter.getRequired(), 1)) {
-                missingRequiredParams.add(parameter.getParamKey());
-                continue;
-            }
-            if (value != null) {
-                renderedContent = renderedContent.replace("{" + parameter.getParamKey() + "}", value);
-            }
-        }
-        if (!missingRequiredParams.isEmpty()) {
-            throw new BusinessException("Missing required prompt parameters: " + String.join(",", missingRequiredParams));
-        }
-        return PromptRenderVO.builder()
-                .promptId(prompt.getId())
-                .title(prompt.getTitle())
-                .renderedContent(renderedContent)
-                .missingRequiredParams(missingRequiredParams)
-                .build();
+    @Override
+    public List<PromptRevisionVO> listRevisions(Long promptId) {
+        getEnabledPromptEntity(promptId);
+        return promptRevisionService.listRevisions(promptId);
+    }
+
+    @Override
+    public PromptRevisionVO getRevision(Long promptId, Long revisionId) {
+        getEnabledPromptEntity(promptId);
+        return promptRevisionService.getRevision(promptId, revisionId);
     }
 
     @Override
@@ -271,7 +260,8 @@ public class PromptServiceImpl implements PromptService {
     }
 
     @Override
-    public PromptDetailVO createPrompt(PromptCreateRequest request) {
+    @Transactional(rollbackFor = Exception.class)
+    public PromptDetailVO createPrompt(PromptCreateRequest request, Long createdBy) {
         ensureStageExists(request.getStageId());
         ensurePromptCodeUnique(request.getCode(), null);
 
@@ -283,16 +273,20 @@ public class PromptServiceImpl implements PromptService {
                 request.getSourceType(), request.getSourceFile(), request.getSourcePage(),
                 request.getSortOrder(), request.getStatus());
         prompt.setCopyCount(0);
+        prompt.setOwnershipType("SYSTEM");
         prompt.setCreateTime(now);
         prompt.setUpdateTime(now);
         prompt.setIsDeleted(0);
         promptTemplateMapper.insert(prompt);
+        replaceParameters(prompt.getId(), request.getParameters());
+        promptRevisionService.createRevision(prompt, createdBy);
         return toDetailVO(prompt);
     }
 
     @Override
-    public PromptDetailVO updatePrompt(Long id, PromptUpdateRequest request) {
-        PromptTemplate prompt = getPromptEntity(id);
+    @Transactional(rollbackFor = Exception.class)
+    public PromptDetailVO updatePrompt(Long id, PromptUpdateRequest request, Long createdBy) {
+        PromptTemplate prompt = getPromptEntityForUpdate(id);
         ensureStageExists(request.getStageId());
         ensurePromptCodeUnique(request.getCode(), id);
 
@@ -303,6 +297,10 @@ public class PromptServiceImpl implements PromptService {
                 request.getSortOrder(), request.getStatus());
         prompt.setUpdateTime(LocalDateTime.now());
         promptTemplateMapper.updateById(prompt);
+        if (request.getParameters() != null) {
+            replaceParameters(prompt.getId(), request.getParameters());
+        }
+        promptRevisionService.createRevision(prompt, createdBy);
         return toDetailVO(prompt);
     }
 
@@ -334,35 +332,37 @@ public class PromptServiceImpl implements PromptService {
     }
 
     @Override
-    public PromptParameterVO createParameter(Long promptId, PromptParameterCreateRequest request) {
-        getPromptEntity(promptId);
+    @Transactional(rollbackFor = Exception.class)
+    public PromptParameterVO createParameter(Long promptId, PromptParameterCreateRequest request, Long createdBy) {
+        PromptTemplate prompt = getPromptEntityForUpdate(promptId);
         ensureParameterKeyUnique(promptId, request.getParamKey(), null);
         LocalDateTime now = LocalDateTime.now();
-        PromptParameter parameter = new PromptParameter();
-        fillParameter(parameter, promptId, request.getParamKey(), request.getParamName(), request.getParamType(),
-                request.getRequired(), request.getDefaultValue(), request.getPlaceholder(), request.getSortOrder());
-        parameter.setCreateTime(now);
-        parameter.setUpdateTime(now);
-        parameter.setIsDeleted(0);
-        promptParameterMapper.insert(parameter);
+        PromptParameter parameter = insertParameter(promptId, request, now);
+        promptRevisionService.createRevision(prompt, createdBy);
         return toParameterVO(parameter);
     }
 
     @Override
-    public PromptParameterVO updateParameter(Long id, PromptParameterUpdateRequest request) {
+    @Transactional(rollbackFor = Exception.class)
+    public PromptParameterVO updateParameter(Long id, PromptParameterUpdateRequest request, Long createdBy) {
         PromptParameter parameter = getParameterEntity(id);
+        PromptTemplate prompt = getPromptEntityForUpdate(parameter.getPromptId());
         ensureParameterKeyUnique(parameter.getPromptId(), request.getParamKey(), id);
         fillParameter(parameter, parameter.getPromptId(), request.getParamKey(), request.getParamName(), request.getParamType(),
                 request.getRequired(), request.getDefaultValue(), request.getPlaceholder(), request.getSortOrder());
         parameter.setUpdateTime(LocalDateTime.now());
         promptParameterMapper.updateById(parameter);
+        promptRevisionService.createRevision(prompt, createdBy);
         return toParameterVO(parameter);
     }
 
     @Override
-    public void deleteParameter(Long id) {
-        getParameterEntity(id);
-        promptParameterMapper.deleteById(id);
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteParameter(Long id, Long createdBy) {
+        PromptParameter parameter = getParameterEntity(id);
+        PromptTemplate prompt = getPromptEntityForUpdate(parameter.getPromptId());
+        promptParameterMapper.hardDeleteById(id);
+        promptRevisionService.createRevision(prompt, createdBy);
     }
 
     private LambdaQueryWrapper<PromptTemplate> enabledPromptQuery() {
@@ -412,6 +412,14 @@ public class PromptServiceImpl implements PromptService {
 
     private PromptTemplate getPromptEntity(Long id) {
         PromptTemplate prompt = promptTemplateMapper.selectById(id);
+        if (prompt == null) {
+            throw new BusinessException("提示词不存在");
+        }
+        return prompt;
+    }
+
+    private PromptTemplate getPromptEntityForUpdate(Long id) {
+        PromptTemplate prompt = promptTemplateMapper.selectByIdForUpdate(id);
         if (prompt == null) {
             throw new BusinessException("提示词不存在");
         }
@@ -511,6 +519,36 @@ public class PromptServiceImpl implements PromptService {
         parameter.setSortOrder(defaultIfNull(sortOrder, DEFAULT_SORT_ORDER));
     }
 
+    private void replaceParameters(Long promptId, List<PromptParameterCreateRequest> requests) {
+        if (requests == null) {
+            return;
+        }
+        Set<String> keys = requests.stream()
+                .map(PromptParameterCreateRequest::getParamKey)
+                .collect(Collectors.toSet());
+        if (keys.size() != requests.size()) {
+            throw new BusinessException("Prompt parameter keys must be unique");
+        }
+        promptParameterMapper.hardDeleteByPromptId(promptId);
+        LocalDateTime now = LocalDateTime.now();
+        requests.forEach(request -> insertParameter(promptId, request, now));
+    }
+
+    private PromptParameter insertParameter(
+            Long promptId,
+            PromptParameterCreateRequest request,
+            LocalDateTime now
+    ) {
+        PromptParameter parameter = new PromptParameter();
+        fillParameter(parameter, promptId, request.getParamKey(), request.getParamName(), request.getParamType(),
+                request.getRequired(), request.getDefaultValue(), request.getPlaceholder(), request.getSortOrder());
+        parameter.setCreateTime(now);
+        parameter.setUpdateTime(now);
+        parameter.setIsDeleted(0);
+        promptParameterMapper.insert(parameter);
+        return parameter;
+    }
+
     private List<Long> normalizeIds(List<Long> ids, String nullMessage) {
         if (ids == null) {
             return Collections.emptyList();
@@ -529,6 +567,9 @@ public class PromptServiceImpl implements PromptService {
         return PromptListVO.builder()
                 .id(prompt.getId())
                 .stageId(prompt.getStageId())
+                .ownerUserId(prompt.getOwnerUserId())
+                .ownershipType(prompt.getOwnershipType())
+                .currentRevisionId(prompt.getCurrentRevisionId())
                 .title(prompt.getTitle())
                 .code(prompt.getCode())
                 .category(prompt.getCategory())
@@ -564,6 +605,9 @@ public class PromptServiceImpl implements PromptService {
         return PromptDetailVO.builder()
                 .id(prompt.getId())
                 .stageId(prompt.getStageId())
+                .ownerUserId(prompt.getOwnerUserId())
+                .ownershipType(prompt.getOwnershipType())
+                .currentRevisionId(prompt.getCurrentRevisionId())
                 .title(prompt.getTitle())
                 .code(prompt.getCode())
                 .category(prompt.getCategory())

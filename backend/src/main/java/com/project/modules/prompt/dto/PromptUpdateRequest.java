@@ -6,6 +6,9 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import jakarta.validation.Valid;
+import java.util.List;
+
 @Data
 public class PromptUpdateRequest {
 
@@ -50,4 +53,8 @@ public class PromptUpdateRequest {
     private Integer sortOrder;
 
     private Integer status;
+
+    @Valid
+    @Size(max = 50, message = "Prompt cannot define more than 50 parameters")
+    private List<PromptParameterCreateRequest> parameters;
 }

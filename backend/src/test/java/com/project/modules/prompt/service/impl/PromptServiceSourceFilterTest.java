@@ -11,6 +11,7 @@ import com.project.modules.prompt.mapper.WorkflowNodePromptRelMapper;
 import com.project.modules.tool.mapper.AiToolMapper;
 import com.project.modules.workflow.mapper.WorkflowStageMapper;
 import com.project.modules.workflow.runtime.mapper.WorkflowTemplateNodeMapper;
+import com.project.modules.prompt.service.PromptRevisionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,6 +44,8 @@ class PromptServiceSourceFilterTest {
     private WorkflowStageMapper workflowStageMapper;
     @Mock
     private AiToolMapper aiToolMapper;
+    @Mock
+    private PromptRevisionService promptRevisionService;
 
     private PromptServiceImpl service;
 
@@ -59,7 +62,8 @@ class PromptServiceSourceFilterTest {
                 workflowNodePromptRelMapper,
                 workflowTemplateNodeMapper,
                 workflowStageMapper,
-                aiToolMapper
+                aiToolMapper,
+                promptRevisionService
         );
     }
 

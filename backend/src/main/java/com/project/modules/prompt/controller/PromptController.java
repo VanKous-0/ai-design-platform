@@ -7,6 +7,7 @@ import com.project.modules.prompt.vo.PromptDetailVO;
 import com.project.modules.prompt.vo.PromptListVO;
 import com.project.modules.prompt.vo.PromptParameterVO;
 import com.project.modules.prompt.vo.PromptRenderVO;
+import com.project.modules.prompt.vo.PromptRevisionVO;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -84,6 +85,19 @@ public class PromptController {
             @Valid @RequestBody PromptRenderRequest request
     ) {
         return Result.success(promptService.renderPrompt(id, request));
+    }
+
+    @GetMapping("/{id}/revisions")
+    public Result<List<PromptRevisionVO>> listRevisions(@PathVariable Long id) {
+        return Result.success(promptService.listRevisions(id));
+    }
+
+    @GetMapping("/{id}/revisions/{revisionId}")
+    public Result<PromptRevisionVO> getRevision(
+            @PathVariable Long id,
+            @PathVariable Long revisionId
+    ) {
+        return Result.success(promptService.getRevision(id, revisionId));
     }
 
     @PostMapping("/{id}/copy")

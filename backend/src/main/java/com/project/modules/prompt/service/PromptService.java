@@ -11,6 +11,7 @@ import com.project.modules.prompt.vo.PromptDetailVO;
 import com.project.modules.prompt.vo.PromptListVO;
 import com.project.modules.prompt.vo.PromptParameterVO;
 import com.project.modules.prompt.vo.PromptRenderVO;
+import com.project.modules.prompt.vo.PromptRevisionVO;
 
 import java.util.List;
 
@@ -39,19 +40,23 @@ public interface PromptService {
 
     PromptRenderVO renderPrompt(Long promptId, PromptRenderRequest request);
 
+    List<PromptRevisionVO> listRevisions(Long promptId);
+
+    PromptRevisionVO getRevision(Long promptId, Long revisionId);
+
     void copyPrompt(Long id);
 
-    PromptDetailVO createPrompt(PromptCreateRequest request);
+    PromptDetailVO createPrompt(PromptCreateRequest request, Long createdBy);
 
-    PromptDetailVO updatePrompt(Long id, PromptUpdateRequest request);
+    PromptDetailVO updatePrompt(Long id, PromptUpdateRequest request, Long createdBy);
 
     void deletePrompt(Long id);
 
     List<Long> setPromptTools(Long promptId, PromptToolSetRequest request);
 
-    PromptParameterVO createParameter(Long promptId, PromptParameterCreateRequest request);
+    PromptParameterVO createParameter(Long promptId, PromptParameterCreateRequest request, Long createdBy);
 
-    PromptParameterVO updateParameter(Long id, PromptParameterUpdateRequest request);
+    PromptParameterVO updateParameter(Long id, PromptParameterUpdateRequest request, Long createdBy);
 
-    void deleteParameter(Long id);
+    void deleteParameter(Long id, Long createdBy);
 }

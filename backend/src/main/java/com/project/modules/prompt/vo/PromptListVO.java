@@ -13,6 +13,12 @@ public class PromptListVO {
 
     private Long stageId;
 
+    private Long ownerUserId;
+
+    private String ownershipType;
+
+    private Long currentRevisionId;
+
     private String title;
 
     private String code;

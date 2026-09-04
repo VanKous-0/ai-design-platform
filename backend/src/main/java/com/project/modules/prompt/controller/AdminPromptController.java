@@ -10,6 +10,7 @@ import com.project.modules.prompt.vo.PromptDetailVO;
 import com.project.modules.prompt.vo.PromptParameterVO;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,16 +33,20 @@ public class AdminPromptController {
     }
 
     @PostMapping
-    public Result<PromptDetailVO> createPrompt(@Valid @RequestBody PromptCreateRequest request) {
-        return Result.success(promptService.createPrompt(request));
+    public Result<PromptDetailVO> createPrompt(
+            Authentication authentication,
+            @Valid @RequestBody PromptCreateRequest request
+    ) {
+        return Result.success(promptService.createPrompt(request, currentUserId(authentication)));
     }
 
     @PutMapping("/{id}")
     public Result<PromptDetailVO> updatePrompt(
             @PathVariable Long id,
+            Authentication authentication,
             @Valid @RequestBody PromptUpdateRequest request
     ) {
-        return Result.success(promptService.updatePrompt(id, request));
+        return Result.success(promptService.updatePrompt(id, request, currentUserId(authentication)));
     }
 
     @DeleteMapping("/{id}")
@@ -61,9 +66,14 @@ public class AdminPromptController {
     @PostMapping("/{id}/parameters")
     public Result<PromptParameterVO> createParameter(
             @PathVariable Long id,
+            Authentication authentication,
             @Valid @RequestBody PromptParameterCreateRequest request
     ) {
-        return Result.success(promptService.createParameter(id, request));
+        return Result.success(promptService.createParameter(id, request, currentUserId(authentication)));
+    }
+
+    private Long currentUserId(Authentication authentication) {
+        return (Long) authentication.getPrincipal();
     }
 
 }

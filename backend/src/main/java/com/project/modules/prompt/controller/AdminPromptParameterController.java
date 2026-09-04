@@ -6,6 +6,7 @@ import com.project.modules.prompt.service.PromptService;
 import com.project.modules.prompt.vo.PromptParameterVO;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -27,14 +28,19 @@ public class AdminPromptParameterController {
     @PutMapping("/{id}")
     public Result<PromptParameterVO> updateParameter(
             @PathVariable Long id,
+            Authentication authentication,
             @Valid @RequestBody PromptParameterUpdateRequest request
     ) {
-        return Result.success(promptService.updateParameter(id, request));
+        return Result.success(promptService.updateParameter(id, request, currentUserId(authentication)));
     }
 
     @DeleteMapping("/{id}")
-    public Result<Void> deleteParameter(@PathVariable Long id) {
-        promptService.deleteParameter(id);
+    public Result<Void> deleteParameter(@PathVariable Long id, Authentication authentication) {
+        promptService.deleteParameter(id, currentUserId(authentication));
         return Result.success();
+    }
+
+    private Long currentUserId(Authentication authentication) {
+        return (Long) authentication.getPrincipal();
     }
 }
