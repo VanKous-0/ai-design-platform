@@ -33,5 +33,8 @@ jobs:
           cache: maven
           cache-dependency-path: backend/pom.xml
 
+      - name: Confirm Docker is available
+        run: docker info
+
       - name: Verify backend with real Testcontainers MySQL
         run: mvn --batch-mode --no-transfer-progress clean verify
