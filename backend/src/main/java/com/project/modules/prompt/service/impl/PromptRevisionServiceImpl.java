@@ -5,6 +5,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.common.exception.BusinessException;
+import com.project.common.exception.DomainError;
+import com.project.common.exception.DomainException;
 import com.project.modules.prompt.entity.PromptParameter;
 import com.project.modules.prompt.entity.PromptRevision;
 import com.project.modules.prompt.entity.PromptTemplate;
@@ -82,12 +84,15 @@ public class PromptRevisionServiceImpl implements PromptRevisionService {
 
     @Override
     public PromptRevision requireRevision(Long promptId, Long revisionId) {
-        PromptRevision revision = revisionMapper.selectOne(new LambdaQueryWrapper<PromptRevision>()
-                .eq(PromptRevision::getId, revisionId)
-                .eq(PromptRevision::getPromptId, promptId)
-                .last("limit 1"));
+        if (revisionId == null) {
+            throw new DomainException(DomainError.PROMPT_REVISION_NOT_FOUND);
+        }
+        PromptRevision revision = revisionMapper.selectById(revisionId);
         if (revision == null) {
-            throw new BusinessException("Prompt revision does not exist or does not belong to this prompt");
+            throw new DomainException(DomainError.PROMPT_REVISION_NOT_FOUND);
+        }
+        if (!revision.getPromptId().equals(promptId)) {
+            throw new DomainException(DomainError.PROMPT_REVISION_MISMATCH);
         }
         return revision;
     }

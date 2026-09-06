@@ -1,8 +1,8 @@
 package com.project.common.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.common.exception.DomainError;
 import com.project.common.result.Result;
-import com.project.common.result.ResultCode;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -64,7 +64,7 @@ public class SecurityConfig {
                             response.setCharacterEncoding(StandardCharsets.UTF_8.name());
                             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                             response.getWriter().write(objectMapper.writeValueAsString(
-                                    Result.failed(ResultCode.UNAUTHORIZED, "请先登录")
+                                    Result.failed(401, DomainError.UNAUTHORIZED.name(), "请先登录")
                             ));
                         })
                         .accessDeniedHandler((request, response, exception) -> {
@@ -72,7 +72,7 @@ public class SecurityConfig {
                             response.setCharacterEncoding(StandardCharsets.UTF_8.name());
                             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                             response.getWriter().write(objectMapper.writeValueAsString(
-                                    Result.failed(ResultCode.FORBIDDEN, "没有访问权限")
+                                    Result.failed(403, DomainError.FORBIDDEN.name(), "没有访问权限")
                             ));
                         }))
                 .authorizeHttpRequests(auth -> auth

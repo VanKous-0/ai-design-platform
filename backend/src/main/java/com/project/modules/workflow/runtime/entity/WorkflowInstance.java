@@ -32,6 +32,8 @@ public class WorkflowInstance {
 
     private BigDecimal progress;
 
+    private Long lockVersion;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

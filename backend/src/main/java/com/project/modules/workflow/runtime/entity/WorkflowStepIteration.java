@@ -49,6 +49,10 @@ public class WorkflowStepIteration {
 
     private Integer selected;
 
+    private String creationRequestId;
+
+    private String creationRequestHash;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

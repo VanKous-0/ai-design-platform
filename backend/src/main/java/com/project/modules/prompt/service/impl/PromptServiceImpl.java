@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.project.common.exception.BusinessException;
+import com.project.common.exception.DomainError;
+import com.project.common.exception.DomainException;
 import com.project.common.result.PageResult;
 import com.project.common.util.PageSupport;
 import com.project.modules.prompt.dto.PromptCreateRequest;
@@ -424,7 +426,7 @@ public class PromptServiceImpl implements PromptService {
     private PromptTemplate getPromptEntity(Long id) {
         PromptTemplate prompt = promptTemplateMapper.selectById(id);
         if (prompt == null) {
-            throw new BusinessException("提示词不存在");
+            throw new DomainException(DomainError.PROMPT_NOT_FOUND, "提示词不存在");
         }
         return prompt;
     }
@@ -432,7 +434,7 @@ public class PromptServiceImpl implements PromptService {
     private PromptTemplate getPromptEntityForUpdate(Long id) {
         PromptTemplate prompt = promptTemplateMapper.selectByIdForUpdate(id);
         if (prompt == null) {
-            throw new BusinessException("提示词不存在");
+            throw new DomainException(DomainError.PROMPT_NOT_FOUND, "提示词不存在");
         }
         return prompt;
     }
@@ -442,7 +444,7 @@ public class PromptServiceImpl implements PromptService {
                 .eq(PromptTemplate::getId, id)
                 .last("limit 1"));
         if (prompt == null) {
-            throw new BusinessException("提示词不存在或未启用");
+            throw new DomainException(DomainError.PROMPT_NOT_FOUND, "提示词不存在或未启用");
         }
         return prompt;
     }
@@ -452,7 +454,7 @@ public class PromptServiceImpl implements PromptService {
                 .eq(PromptTemplate::getCode, code)
                 .last("limit 1"));
         if (existing != null && !existing.getId().equals(excludeId)) {
-            throw new BusinessException("提示词编码已存在");
+            throw new DomainException(DomainError.RESOURCE_CONFLICT, "提示词编码已存在");
         }
     }
 

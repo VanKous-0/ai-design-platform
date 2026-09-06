@@ -5,5 +5,9 @@ import com.project.modules.statistics.vo.UsageEventVO;
 
 public interface UsageEventService {
 
-    UsageEventVO createEvent(Long userId, UsageEventCreateRequest request);
+    default UsageEventVO createEvent(Long userId, UsageEventCreateRequest request) {
+        return createEvent(userId, request, null);
+    }
+
+    UsageEventVO createEvent(Long userId, UsageEventCreateRequest request, String idempotencyKey);
 }

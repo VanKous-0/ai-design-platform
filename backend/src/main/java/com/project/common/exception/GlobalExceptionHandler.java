@@ -22,6 +22,14 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(DomainException.class)
+    public ResponseEntity<Result<Void>> handleDomainException(DomainException ex) {
+        DomainError error = ex.getError();
+        log.warn("Domain exception [{}]: {}", error.name(), ex.getMessage());
+        return ResponseEntity.status(error.getStatus())
+                .body(Result.failed(error.getStatus().value(), error.name(), ex.getMessage()));
+    }
+
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Result<Void>> handleBusinessException(BusinessException ex) {
         log.warn("Business exception: {}", ex.getMessage());
@@ -32,21 +40,21 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleUnauthorizedException(UnauthorizedException ex) {
         log.warn("Unauthorized exception: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Result.failed(ResultCode.UNAUTHORIZED, ex.getMessage()));
+                .body(Result.failed(401, DomainError.UNAUTHORIZED.name(), ex.getMessage()));
     }
 
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<Result<Void>> handleAuthenticationException(AuthenticationException ex) {
         log.warn("Authentication exception: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Result.failed(ResultCode.UNAUTHORIZED, "请先登录"));
+                .body(Result.failed(401, DomainError.UNAUTHORIZED.name(), "请先登录"));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Result<Void>> handleAccessDeniedException(AccessDeniedException ex) {
         log.warn("Access denied exception: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(Result.failed(ResultCode.FORBIDDEN, "没有访问权限"));
+                .body(Result.failed(403, DomainError.FORBIDDEN.name(), "没有访问权限"));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -57,7 +65,7 @@ public class GlobalExceptionHandler {
                 .map(error -> error.getField() + ": " + error.getDefaultMessage())
                 .collect(Collectors.joining("; "));
         log.warn("Validation exception: {}", message);
-        return ResponseEntity.badRequest().body(Result.failed(ResultCode.VALIDATION_ERROR, message));
+        return validationFailure(message);
     }
 
     @ExceptionHandler(BindException.class)
@@ -68,14 +76,13 @@ public class GlobalExceptionHandler {
                 .map(error -> error.getField() + ": " + error.getDefaultMessage())
                 .collect(Collectors.joining("; "));
         log.warn("Bind exception: {}", message);
-        return ResponseEntity.badRequest().body(Result.failed(ResultCode.VALIDATION_ERROR, message));
+        return validationFailure(message);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<Result<Void>> handleConstraintViolationException(ConstraintViolationException ex) {
         log.warn("Constraint violation exception: {}", ex.getMessage());
-        return ResponseEntity.badRequest()
-                .body(Result.failed(ResultCode.VALIDATION_ERROR, ex.getMessage()));
+        return validationFailure(ex.getMessage());
     }
 
     @ExceptionHandler({
@@ -84,15 +91,15 @@ public class GlobalExceptionHandler {
     })
     public ResponseEntity<Result<Void>> handleBadRequestException(Exception ex) {
         log.warn("Bad request exception: {}", ex.getMessage());
-        return ResponseEntity.badRequest()
-                .body(Result.failed(ResultCode.BAD_REQUEST, ex.getMessage()));
+        return validationFailure(ex.getMessage());
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Result<Void>> handleDataIntegrityViolationException(DataIntegrityViolationException ex) {
         log.warn("Data integrity violation: {}", ex.getMostSpecificCause().getMessage());
-        return ResponseEntity.badRequest()
-                .body(Result.failed(ResultCode.BAD_REQUEST, "提交的数据不符合字段长度或唯一性约束"));
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Result.failed(409, DomainError.RESOURCE_CONFLICT.name(),
+                        "提交的数据与现有资源或数据库约束冲突"));
     }
 
     @ExceptionHandler(Exception.class)
@@ -100,5 +107,11 @@ public class GlobalExceptionHandler {
         log.error("Unhandled system exception", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Result.failed(ResultCode.SYSTEM_ERROR, "服务器内部错误"));
+    }
+
+    private ResponseEntity<Result<Void>> validationFailure(String message) {
+        return ResponseEntity.badRequest()
+                .body(Result.failed(ResultCode.VALIDATION_ERROR.getCode(),
+                        DomainError.VALIDATION_ERROR.name(), message));
     }
 }

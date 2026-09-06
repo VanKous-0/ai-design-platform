@@ -2,6 +2,8 @@ package com.project.modules.profile.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.project.common.exception.BusinessException;
+import com.project.common.exception.DomainError;
+import com.project.common.exception.DomainException;
 import com.project.modules.profile.dto.UserPreferenceSignalUpsertRequest;
 import com.project.modules.profile.entity.UserPreferenceSignal;
 import com.project.modules.profile.mapper.UserPreferenceSignalMapper;
@@ -41,11 +43,10 @@ public class UserPreferenceSignalServiceImpl implements UserPreferenceSignalServ
     @Override
     @Transactional(rollbackFor = Exception.class)
     public UserPreferenceSignalVO upsertUserDeclared(Long userId, UserPreferenceSignalUpsertRequest request) {
-        PreferenceSource source = parseEnum(
-                PreferenceSource.class, request.getSource(), "Unsupported preference source"
-        );
+        PreferenceSource source = parseSource(request.getSource());
         if (source != PreferenceSource.USER_DECLARED) {
-            throw new BusinessException("The user preference endpoint only accepts USER_DECLARED signals");
+            throw new DomainException(DomainError.PROFILE_INVALID_SOURCE,
+                    "The user preference endpoint only accepts USER_DECLARED signals");
         }
         return upsert(userId, request);
     }
@@ -53,11 +54,10 @@ public class UserPreferenceSignalServiceImpl implements UserPreferenceSignalServ
     @Override
     @Transactional(rollbackFor = Exception.class)
     public UserPreferenceSignalVO upsertInferred(Long userId, UserPreferenceSignalUpsertRequest request) {
-        PreferenceSource source = parseEnum(
-                PreferenceSource.class, request.getSource(), "Unsupported preference source"
-        );
+        PreferenceSource source = parseSource(request.getSource());
         if (source == PreferenceSource.USER_DECLARED) {
-            throw new BusinessException("USER_DECLARED signals must be submitted by the profile owner");
+            throw new DomainException(DomainError.PROFILE_INVALID_SOURCE,
+                    "USER_DECLARED signals must be submitted by the profile owner");
         }
         return upsert(userId, request);
     }
@@ -65,7 +65,7 @@ public class UserPreferenceSignalServiceImpl implements UserPreferenceSignalServ
     @Override
     @Transactional(rollbackFor = Exception.class)
     public UserPreferenceSignalVO upsert(Long userId, UserPreferenceSignalUpsertRequest request) {
-        PreferenceSource source = parseEnum(PreferenceSource.class, request.getSource(), "Unsupported preference source");
+        PreferenceSource source = parseSource(request.getSource());
         PreferenceScope scope = parseEnum(PreferenceScope.class, request.getScope(), "Unsupported preference scope");
         PreferenceSentiment sentiment = StringUtils.hasText(request.getSentiment())
                 ? parseEnum(PreferenceSentiment.class, request.getSentiment(), "Unsupported preference sentiment")
@@ -202,6 +202,14 @@ public class UserPreferenceSignalServiceImpl implements UserPreferenceSignalServ
             return Enum.valueOf(type, value.trim().toUpperCase());
         } catch (IllegalArgumentException | NullPointerException ex) {
             throw new BusinessException(message);
+        }
+    }
+
+    private PreferenceSource parseSource(String value) {
+        try {
+            return PreferenceSource.valueOf(value.trim().toUpperCase());
+        } catch (IllegalArgumentException | NullPointerException ex) {
+            throw new DomainException(DomainError.PROFILE_INVALID_SOURCE, "Unsupported preference source");
         }
     }
 

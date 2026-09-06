@@ -35,6 +35,12 @@ public class WorkflowStepRecord {
 
     private String nextSuggestion;
 
+    private String completionRequestId;
+
+    private String completionRequestHash;
+
+    private String completionResponseJson;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

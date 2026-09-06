@@ -1,8 +1,8 @@
 package com.project.common.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.common.exception.DomainError;
 import com.project.common.result.Result;
-import com.project.common.result.ResultCode;
 import com.project.common.util.JwtUtil;
 import com.project.modules.user.entity.SysUser;
 import com.project.modules.user.mapper.SysUserMapper;
@@ -90,7 +90,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write(objectMapper.writeValueAsString(
-                Result.failed(ResultCode.UNAUTHORIZED, "登录状态已失效，请重新登录")
+                Result.failed(401, DomainError.UNAUTHORIZED.name(), "登录状态已失效，请重新登录")
         ));
     }
 }

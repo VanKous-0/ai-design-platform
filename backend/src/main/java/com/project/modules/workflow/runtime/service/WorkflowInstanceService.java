@@ -27,13 +27,35 @@ public interface WorkflowInstanceService {
 
     WorkflowNextStepVO getNextStep(Long userId, Long instanceId);
 
-    WorkflowStepCompleteVO completeStep(Long userId, Long instanceId, Long nodeId, WorkflowStepCompleteRequest request);
+    default WorkflowStepCompleteVO completeStep(
+            Long userId, Long instanceId, Long nodeId, WorkflowStepCompleteRequest request
+    ) {
+        return completeStep(userId, instanceId, nodeId, request, null);
+    }
+
+    WorkflowStepCompleteVO completeStep(
+            Long userId,
+            Long instanceId,
+            Long nodeId,
+            WorkflowStepCompleteRequest request,
+            String idempotencyKey
+    );
+
+    default WorkflowStepIterationVO createStepIteration(
+            Long userId,
+            Long instanceId,
+            Long nodeId,
+            WorkflowStepIterationCreateRequest request
+    ) {
+        return createStepIteration(userId, instanceId, nodeId, request, null);
+    }
 
     WorkflowStepIterationVO createStepIteration(
             Long userId,
             Long instanceId,
             Long nodeId,
-            WorkflowStepIterationCreateRequest request
+            WorkflowStepIterationCreateRequest request,
+            String idempotencyKey
     );
 
     List<WorkflowStepIterationVO> listStepIterations(Long userId, Long instanceId, Long nodeId);

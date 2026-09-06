@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -78,9 +79,12 @@ public class WorkflowInstanceController {
             Authentication authentication,
             @PathVariable Long id,
             @PathVariable Long nodeId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody WorkflowStepCompleteRequest request
     ) {
-        return Result.success(workflowInstanceService.completeStep(currentUserId(authentication), id, nodeId, request));
+        return Result.success(workflowInstanceService.completeStep(
+                currentUserId(authentication), id, nodeId, request, idempotencyKey
+        ));
     }
 
     @PostMapping("/{id}/steps/{nodeId}/iterations")
@@ -88,13 +92,15 @@ public class WorkflowInstanceController {
             Authentication authentication,
             @PathVariable Long id,
             @PathVariable Long nodeId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody WorkflowStepIterationCreateRequest request
     ) {
         return Result.success(workflowInstanceService.createStepIteration(
                 currentUserId(authentication),
                 id,
                 nodeId,
-                request
+                request,
+                idempotencyKey
         ));
     }
 

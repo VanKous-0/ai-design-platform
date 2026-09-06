@@ -35,6 +35,12 @@ public class UsageEvent {
 
     private String preferenceEvidenceJson;
 
+    private String idempotencyActor;
+
+    private String idempotencyKey;
+
+    private String idempotencyRequestHash;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;
