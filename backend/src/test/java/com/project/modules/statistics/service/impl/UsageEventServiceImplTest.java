@@ -2,6 +2,7 @@ package com.project.modules.statistics.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.common.exception.BusinessException;
+import com.project.common.idempotency.IdempotencySupport;
 import com.project.modules.profile.model.PreferenceEvidence;
 import com.project.modules.profile.service.PreferenceObservationService;
 import com.project.modules.statistics.dto.UsageEventCreateRequest;
@@ -34,10 +35,12 @@ class UsageEventServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        ObjectMapper objectMapper = new ObjectMapper();
         service = new UsageEventServiceImpl(
                 usageEventMapper,
-                new ObjectMapper(),
-                preferenceObservationService
+                objectMapper,
+                preferenceObservationService,
+                new IdempotencySupport(objectMapper)
         );
     }
 

@@ -136,6 +136,10 @@ class MySqlExperimentIntegrationTest {
                 "phase1admin", passwordEncoder.encode("admin-password"), "Phase 1 Admin",
                 "phase1user", passwordEncoder.encode("user-password"), "Phase 1 User",
                 "phase11user", passwordEncoder.encode("user-password"), "Phase 1.1 User");
+        jdbcTemplate.update("""
+                INSERT INTO sys_user (username, password_hash, nickname, role, status, is_deleted)
+                VALUES (?, ?, ?, 'USER', 1, 0)
+                """, "phase2user", passwordEncoder.encode("user-password"), "Phase 2 User");
     }
 
     @Test
@@ -163,7 +167,7 @@ class MySqlExperimentIntegrationTest {
                 Integer.class
         );
 
-        org.junit.jupiter.api.Assertions.assertEquals("36", latestVersion);
+        org.junit.jupiter.api.Assertions.assertEquals("37", latestVersion);
         org.junit.jupiter.api.Assertions.assertTrue(revisionCount >= promptCount);
         org.junit.jupiter.api.Assertions.assertEquals(0, invalidCurrentRevisionCount);
     }
@@ -190,7 +194,7 @@ class MySqlExperimentIntegrationTest {
                     WHERE table_schema = 'ai_design_platform_fresh'
                       AND table_name IN (
                           'prompt_template', 'prompt_revision', 'prompt_preference_hint',
-                          'user_preference_signal', 'workflow_step_iteration'
+                          'user_preference_signal', 'workflow_step_iteration', 'workflow_node_runtime'
                       )
                     """,
                     Integer.class
@@ -206,8 +210,8 @@ class MySqlExperimentIntegrationTest {
                     Integer.class
             );
 
-            org.junit.jupiter.api.Assertions.assertEquals("36", latestVersion);
-            org.junit.jupiter.api.Assertions.assertEquals(5, requiredTables);
+            org.junit.jupiter.api.Assertions.assertEquals("37", latestVersion);
+            org.junit.jupiter.api.Assertions.assertEquals(6, requiredTables);
             org.junit.jupiter.api.Assertions.assertEquals(0, invalidCurrentRevisionCount);
         }
     }
@@ -858,6 +862,376 @@ class MySqlExperimentIntegrationTest {
                 .orElseThrow();
         org.junit.jupiter.api.Assertions.assertEquals("现代极简", effectiveStyle.path("preferenceValue").asText());
         org.junit.jupiter.api.Assertions.assertEquals("USER_DECLARED", effectiveStyle.path("source").asText());
+    }
+
+    @Test
+    void concurrentStepCompletionAdvancesExactlyOnceAndReturnsStableConflict() throws Exception {
+        String token = login("phase2user", "user-password");
+        JsonNode instance = createWorkflowInstance(token, "Phase 2 concurrent transition");
+        long instanceId = instance.path("id").asLong();
+        long nodeId = instance.path("currentNodeId").asLong();
+        int totalNodes = instance.path("nodes").size();
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(2);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            java.util.List<java.util.concurrent.Future<org.springframework.test.web.servlet.MvcResult>> futures =
+                    java.util.stream.IntStream.range(0, 2)
+                            .mapToObj(index -> executor.submit(() -> {
+                                ready.countDown();
+                                await(start);
+                                return mockMvc.perform(post("/api/workflow-instances/" + instanceId
+                                                + "/steps/" + nodeId + "/complete")
+                                                .header("Authorization", "Bearer " + token)
+                                                .header("Idempotency-Key", "phase2-complete-" + instanceId + "-" + index)
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content("{\"outputContent\":\"concurrent completion\"}"))
+                                        .andReturn();
+                            }))
+                            .toList();
+            org.junit.jupiter.api.Assertions.assertTrue(ready.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            start.countDown();
+            java.util.List<org.springframework.test.web.servlet.MvcResult> results = new java.util.ArrayList<>();
+            for (java.util.concurrent.Future<org.springframework.test.web.servlet.MvcResult> future : futures) {
+                results.add(future.get(20, java.util.concurrent.TimeUnit.SECONDS));
+            }
+            java.util.List<Integer> statuses = results.stream()
+                    .map(result -> result.getResponse().getStatus()).sorted().toList();
+            org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(200, 409), statuses);
+            JsonNode conflict = objectMapper.readTree(results.stream()
+                    .filter(result -> result.getResponse().getStatus() == 409)
+                    .findFirst().orElseThrow().getResponse()
+                    .getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    "WORKFLOW_STATE_CONFLICT", conflict.path("errorCode").asText()
+            );
+        } finally {
+            executor.shutdownNow();
+        }
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_record WHERE instance_id = ? AND node_id = ?",
+                Integer.class, instanceId, nodeId
+        ));
+        java.util.Map<String, Object> stored = jdbcTemplate.queryForMap(
+                "SELECT current_node_id, progress, lock_version FROM workflow_instance WHERE id = ?", instanceId
+        );
+        org.junit.jupiter.api.Assertions.assertNotEquals(nodeId, ((Number) stored.get("current_node_id")).longValue());
+        org.junit.jupiter.api.Assertions.assertEquals(1L, ((Number) stored.get("lock_version")).longValue());
+        java.math.BigDecimal expectedProgress = java.math.BigDecimal.valueOf(100)
+                .divide(java.math.BigDecimal.valueOf(totalNodes), 2, java.math.RoundingMode.HALF_UP);
+        org.junit.jupiter.api.Assertions.assertEquals(
+                0, ((java.math.BigDecimal) stored.get("progress")).compareTo(expectedProgress)
+        );
+    }
+
+    @Test
+    void stepCompletionRetryReturnsTheOriginalCommittedResponse() throws Exception {
+        String token = login("phase2user", "user-password");
+        JsonNode instance = createWorkflowInstance(token, "Phase 2 completion idempotency");
+        long instanceId = instance.path("id").asLong();
+        long nodeId = instance.path("currentNodeId").asLong();
+        String key = "phase2-completion-retry-" + instanceId;
+        String body = "{\"outputContent\":\"idempotent completion\",\"durationSeconds\":3}";
+        String first = mockMvc.perform(post("/api/workflow-instances/" + instanceId
+                        + "/steps/" + nodeId + "/complete")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        String replay = mockMvc.perform(post("/api/workflow-instances/" + instanceId
+                        + "/steps/" + nodeId + "/complete")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        org.junit.jupiter.api.Assertions.assertEquals(
+                objectMapper.readTree(first).path("data"), objectMapper.readTree(replay).path("data")
+        );
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_record WHERE instance_id = ? AND node_id = ?",
+                Integer.class, instanceId, nodeId
+        ));
+        mockMvc.perform(post("/api/workflow-instances/" + instanceId + "/steps/" + nodeId + "/complete")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"outputContent\":\"different request\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("RESOURCE_CONFLICT"));
+    }
+
+    @Test
+    void tenConcurrentIterationsReceiveContinuousNumbersAndRetryReplaysOriginal() throws Exception {
+        String token = login("phase2user", "user-password");
+        JsonNode instance = createWorkflowInstance(token, "Phase 2 iteration allocation");
+        long instanceId = instance.path("id").asLong();
+        long nodeId = instance.path("currentNodeId").asLong();
+        int concurrency = 10;
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(concurrency);
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(concurrency);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.List<JsonNode> responses = new java.util.ArrayList<>();
+        try {
+            java.util.List<java.util.concurrent.Future<JsonNode>> futures = java.util.stream.IntStream
+                    .range(0, concurrency)
+                    .mapToObj(index -> executor.submit(() -> {
+                        ready.countDown();
+                        await(start);
+                        String body = "{\"outputContent\":\"iteration-" + index + "\"}";
+                        String response = mockMvc.perform(post("/api/workflow-instances/" + instanceId
+                                        + "/steps/" + nodeId + "/iterations")
+                                        .header("Authorization", "Bearer " + token)
+                                        .header("Idempotency-Key", "phase2-iteration-" + instanceId + "-" + index)
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(body))
+                                .andExpect(status().isOk())
+                                .andReturn().getResponse()
+                                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+                        return objectMapper.readTree(response).path("data");
+                    })).toList();
+            org.junit.jupiter.api.Assertions.assertTrue(ready.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            start.countDown();
+            for (java.util.concurrent.Future<JsonNode> future : futures) {
+                responses.add(future.get(30, java.util.concurrent.TimeUnit.SECONDS));
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        java.util.List<Integer> numbers = responses.stream()
+                .map(node -> node.path("iterationNo").asInt()).sorted().toList();
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.stream.IntStream.rangeClosed(1, concurrency).boxed().toList(), numbers
+        );
+        String replayBody = mockMvc.perform(post("/api/workflow-instances/" + instanceId
+                        + "/steps/" + nodeId + "/iterations")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "phase2-iteration-" + instanceId + "-0")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"outputContent\":\"iteration-0\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        org.junit.jupiter.api.Assertions.assertEquals(
+                responses.get(0).path("id").asLong(), objectMapper.readTree(replayBody).path("data").path("id").asLong()
+        );
+        org.junit.jupiter.api.Assertions.assertEquals(concurrency, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_iteration WHERE instance_id = ? AND node_id = ?",
+                Integer.class, instanceId, nodeId
+        ));
+        org.junit.jupiter.api.Assertions.assertEquals(concurrency + 1, jdbcTemplate.queryForObject(
+                "SELECT next_iteration_no FROM workflow_node_runtime WHERE instance_id = ? AND node_id = ?",
+                Integer.class, instanceId, nodeId
+        ));
+    }
+
+    @Test
+    void concurrentSelectionLeavesOneDatabaseCanonicalIteration() throws Exception {
+        String token = login("phase2user", "user-password");
+        JsonNode instance = createWorkflowInstance(token, "Phase 2 canonical selection");
+        long instanceId = instance.path("id").asLong();
+        long nodeId = instance.path("currentNodeId").asLong();
+        long firstId = createIteration(token, instanceId, nodeId, "selection-a", "selection output A")
+                .path("id").asLong();
+        long secondId = createIteration(token, instanceId, nodeId, "selection-b", "selection output B")
+                .path("id").asLong();
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            java.util.List<java.util.concurrent.Future<Void>> futures = java.util.List.of(firstId, secondId).stream()
+                    .map(iterationId -> executor.submit(() -> {
+                        await(start);
+                        mockMvc.perform(put("/api/workflow-instances/" + instanceId + "/steps/" + nodeId
+                                        + "/iterations/" + iterationId + "/select")
+                                        .header("Authorization", "Bearer " + token))
+                                .andExpect(status().isOk());
+                        return (Void) null;
+                    })).toList();
+            start.countDown();
+            for (java.util.concurrent.Future<Void> future : futures) {
+                future.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_iteration WHERE instance_id = ? AND node_id = ? AND selected = 1",
+                Integer.class, instanceId, nodeId
+        ));
+        Long selectedRow = jdbcTemplate.queryForObject(
+                "SELECT id FROM workflow_step_iteration WHERE instance_id = ? AND node_id = ? AND selected = 1",
+                Long.class, instanceId, nodeId
+        );
+        Long canonical = jdbcTemplate.queryForObject(
+                "SELECT selected_iteration_id FROM workflow_node_runtime WHERE instance_id = ? AND node_id = ?",
+                Long.class, instanceId, nodeId
+        );
+        org.junit.jupiter.api.Assertions.assertEquals(selectedRow, canonical);
+        org.junit.jupiter.api.Assertions.assertTrue(java.util.Set.of(firstId, secondId).contains(canonical));
+    }
+
+    @Test
+    void failedStepRecordWriteRollsBackEarlierCasTransition() throws Exception {
+        String token = login("phase2user", "user-password");
+        JsonNode instance = createWorkflowInstance(token, "Phase 2 rollback proof");
+        long instanceId = instance.path("id").asLong();
+        long nodeId = instance.path("currentNodeId").asLong();
+        Long userId = jdbcTemplate.queryForObject(
+                "SELECT user_id FROM workflow_instance WHERE id = ?", Long.class, instanceId
+        );
+        jdbcTemplate.update("""
+                INSERT INTO workflow_step_record
+                    (instance_id, node_id, user_id, output_content, status, completed_at,
+                     create_time, update_time, is_deleted)
+                VALUES (?, ?, ?, 'pre-existing record', 'COMPLETED', CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
+                """, instanceId, nodeId, userId);
+
+        mockMvc.perform(post("/api/workflow-instances/" + instanceId + "/steps/" + nodeId + "/complete")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"outputContent\":\"must roll back\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("WORKFLOW_STATE_CONFLICT"));
+
+        java.util.Map<String, Object> stored = jdbcTemplate.queryForMap(
+                "SELECT current_node_id, progress, lock_version FROM workflow_instance WHERE id = ?", instanceId
+        );
+        org.junit.jupiter.api.Assertions.assertEquals(nodeId, ((Number) stored.get("current_node_id")).longValue());
+        org.junit.jupiter.api.Assertions.assertEquals(0L, ((Number) stored.get("lock_version")).longValue());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                0, ((java.math.BigDecimal) stored.get("progress")).compareTo(java.math.BigDecimal.ZERO)
+        );
+    }
+
+    @Test
+    void domainErrorsExposeStableHttpContracts() throws Exception {
+        String ownerToken = login("phase2user", "user-password");
+        String otherToken = login("phase11user", "user-password");
+        JsonNode instance = createWorkflowInstance(ownerToken, "Phase 2 error contracts");
+        long instanceId = instance.path("id").asLong();
+        long currentNodeId = instance.path("currentNodeId").asLong();
+        long futureNodeId = java.util.stream.StreamSupport.stream(instance.path("nodes").spliterator(), false)
+                .mapToLong(node -> node.path("id").asLong())
+                .filter(id -> id != currentNodeId).findFirst().orElseThrow();
+
+        mockMvc.perform(get("/api/workflow-instances/999999999")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WORKFLOW_NOT_FOUND"));
+        mockMvc.perform(get("/api/workflow-instances/" + instanceId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("WORKFLOW_NOT_OWNED"));
+        mockMvc.perform(post("/api/workflow-instances/" + instanceId + "/steps/" + futureNodeId + "/complete")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"outputContent\":\"future node\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("WORKFLOW_NODE_NOT_CURRENT"));
+        mockMvc.perform(post("/api/workflow-instances/" + instanceId + "/steps/" + currentNodeId + "/complete")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"durationSeconds\":-1}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+        mockMvc.perform(post("/api/user/preference-signals")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"preferenceKey":"style","preferenceValue":"minimal",
+                                 "scope":"LONG_TERM","source":"AGENT_INFERRED"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("PROFILE_INVALID_SOURCE"));
+    }
+
+    @Test
+    void usageEventIdempotencyReturnsOriginalAndContributesEvidenceOnce() throws Exception {
+        String adminToken = login("phase1admin", "admin-password");
+        String userToken = login("phase2user", "user-password");
+        Long userId = jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_user WHERE username = 'phase2user'", Long.class
+        );
+        Long stageId = jdbcTemplate.queryForObject(
+                "SELECT id FROM workflow_stage WHERE status = 1 AND is_deleted = 0 ORDER BY id LIMIT 1", Long.class
+        );
+        String promptResponse = mockMvc.perform(post("/api/admin/prompts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"stageId":%d,"title":"Phase 2 idempotent evidence",
+                                 "code":"PHASE2_IDEMPOTENT_EVIDENCE","category":"design_intent",
+                                 "content":"Create a deliberate design","sourceType":"RECONSTRUCTED","status":1,
+                                 "preferenceHints":[{"preferenceKey":"phase2_style","preferenceValue":"calm"}]}
+                                """.formatted(stageId)))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        long promptId = objectMapper.readTree(promptResponse).path("data").path("id").asLong();
+        String key = "phase2-usage-evidence";
+        String body = "{\"eventType\":\"render_prompt\",\"targetType\":\"prompt\",\"targetId\":"
+                + promptId + "}";
+        String first = mockMvc.perform(post("/api/usage-events")
+                        .header("Authorization", "Bearer " + userToken)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        String replay = mockMvc.perform(post("/api/usage-events")
+                        .header("Authorization", "Bearer " + userToken)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        long firstId = objectMapper.readTree(first).path("data").path("id").asLong();
+        org.junit.jupiter.api.Assertions.assertEquals(
+                firstId, objectMapper.readTree(replay).path("data").path("id").asLong()
+        );
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM usage_event WHERE idempotency_actor = ? AND idempotency_key = ?",
+                Integer.class, "USER:" + userId, key
+        ));
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT evidence_count FROM user_preference_signal
+                WHERE user_id = ? AND preference_key = 'phase2_style'
+                  AND source = 'BEHAVIOR_INFERRED' AND is_deleted = 0
+                """, Integer.class, userId));
+        mockMvc.perform(post("/api/usage-events")
+                        .header("Authorization", "Bearer " + userToken)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"eventType\":\"login\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("RESOURCE_CONFLICT"));
+    }
+
+    private JsonNode createWorkflowInstance(String token, String title) throws Exception {
+        Long templateId = jdbcTemplate.queryForObject(
+                "SELECT id FROM workflow_template WHERE status = 1 AND is_deleted = 0 ORDER BY id LIMIT 1", Long.class
+        );
+        String response = mockMvc.perform(post("/api/workflow-instances")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"templateId\":" + templateId + ",\"title\":\"" + title + "\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data");
+    }
+
+    private JsonNode createIteration(
+            String token, long instanceId, long nodeId, String key, String output
+    ) throws Exception {
+        String response = mockMvc.perform(post("/api/workflow-instances/" + instanceId
+                        + "/steps/" + nodeId + "/iterations")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", key + "-" + instanceId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"outputContent\":\"" + output + "\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data");
     }
 
     private java.util.Map<String, Object> behaviorSignal(Long userId, String preferenceKey) {

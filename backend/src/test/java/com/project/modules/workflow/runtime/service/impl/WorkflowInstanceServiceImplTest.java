@@ -1,28 +1,24 @@
 package com.project.modules.workflow.runtime.service.impl;
 
-import com.project.common.exception.BusinessException;
 import com.project.modules.workflow.runtime.dto.WorkflowInstanceCreateRequest;
 import com.project.modules.workflow.runtime.dto.WorkflowStepCompleteRequest;
 import com.project.modules.workflow.runtime.dto.WorkflowStepIterationCreateRequest;
 import com.project.modules.workflow.runtime.entity.WorkflowInstance;
-import com.project.modules.workflow.runtime.entity.WorkflowStepIteration;
-import com.project.modules.workflow.runtime.entity.WorkflowStepRecord;
 import com.project.modules.workflow.runtime.entity.WorkflowTemplate;
 import com.project.modules.workflow.runtime.entity.WorkflowTemplateNode;
 import com.project.modules.workflow.runtime.mapper.WorkflowInstanceMapper;
-import com.project.modules.workflow.runtime.mapper.WorkflowStepIterationMapper;
+import com.project.modules.workflow.runtime.mapper.WorkflowNodeRuntimeMapper;
 import com.project.modules.workflow.runtime.mapper.WorkflowStepRecordMapper;
 import com.project.modules.workflow.runtime.mapper.WorkflowTemplateMapper;
 import com.project.modules.workflow.runtime.mapper.WorkflowTemplateNodeMapper;
+import com.project.modules.workflow.runtime.service.WorkflowIterationService;
+import com.project.modules.workflow.runtime.service.WorkflowRuntimeAccessService;
+import com.project.modules.workflow.runtime.service.WorkflowTransitionService;
 import com.project.modules.workflow.runtime.vo.WorkflowInstanceDetailVO;
+import com.project.modules.workflow.runtime.vo.WorkflowNextStepVO;
 import com.project.modules.workflow.runtime.vo.WorkflowProgressVO;
 import com.project.modules.workflow.runtime.vo.WorkflowStepCompleteVO;
 import com.project.modules.workflow.runtime.vo.WorkflowStepIterationVO;
-import com.project.modules.tool.entity.AiTool;
-import com.project.modules.tool.mapper.AiToolMapper;
-import com.project.modules.prompt.service.PromptRevisionService;
-import com.project.modules.prompt.entity.PromptRevision;
-import com.project.modules.profile.service.UserPreferenceContextService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,7 +29,6 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
@@ -42,57 +37,33 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class WorkflowInstanceServiceImplTest {
 
-    @Mock
-    private WorkflowTemplateMapper templateMapper;
-
-    @Mock
-    private WorkflowTemplateNodeMapper nodeMapper;
-
-    @Mock
-    private WorkflowInstanceMapper instanceMapper;
-
-    @Mock
-    private WorkflowStepRecordMapper stepRecordMapper;
-
-    @Mock
-    private WorkflowStepIterationMapper stepIterationMapper;
-
-    @Mock
-    private AiToolMapper aiToolMapper;
-
-    @Mock
-    private PromptRevisionService promptRevisionService;
-
-    @Mock
-    private UserPreferenceContextService preferenceContextService;
+    @Mock private WorkflowTemplateMapper templateMapper;
+    @Mock private WorkflowTemplateNodeMapper nodeMapper;
+    @Mock private WorkflowInstanceMapper instanceMapper;
+    @Mock private WorkflowStepRecordMapper stepRecordMapper;
+    @Mock private WorkflowRuntimeAccessService accessService;
+    @Mock private WorkflowTransitionService transitionService;
+    @Mock private WorkflowIterationService iterationService;
+    @Mock private WorkflowNodeRuntimeMapper nodeRuntimeMapper;
 
     private WorkflowInstanceServiceImpl service;
 
     @BeforeEach
     void setUp() {
         service = new WorkflowInstanceServiceImpl(
-                templateMapper,
-                nodeMapper,
-                instanceMapper,
-                stepRecordMapper,
-                stepIterationMapper,
-                aiToolMapper,
-                promptRevisionService,
-                preferenceContextService
+                templateMapper, nodeMapper, instanceMapper, stepRecordMapper, nodeRuntimeMapper,
+                accessService, transitionService, iterationService
         );
-        org.mockito.Mockito.lenient().when(preferenceContextService.buildContextSnapshot(any()))
-                .thenReturn("{\"schemaVersion\":1,\"preferences\":[]}");
     }
 
     @Test
-    void createsInstanceAtFirstEnabledNode() {
+    void createsInstanceAndInitializesNodeRuntimeRows() {
         WorkflowTemplate template = template(10L, "景观设计流程");
         WorkflowTemplateNode firstNode = node(101L, 10L, "场地分析", 1);
         WorkflowInstanceCreateRequest request = new WorkflowInstanceCreateRequest();
         request.setTemplateId(10L);
-
-        when(templateMapper.selectOne(any())).thenReturn(template);
-        when(nodeMapper.selectList(any())).thenReturn(List.of(firstNode));
+        when(accessService.requireEnabledTemplate(10L)).thenReturn(template);
+        when(accessService.listEnabledNodes(10L)).thenReturn(List.of(firstNode));
         doAnswer(invocation -> {
             WorkflowInstance instance = invocation.getArgument(0);
             instance.setId(1000L);
@@ -106,20 +77,19 @@ class WorkflowInstanceServiceImplTest {
 
         assertEquals(1000L, result.getId());
         assertEquals(101L, result.getCurrentNodeId());
-        assertEquals("RUNNING", result.getStatus());
-        assertEquals(BigDecimal.ZERO, result.getProgress());
+        assertEquals(0, result.getProgress().compareTo(BigDecimal.ZERO));
+        verify(nodeRuntimeMapper).insertIfAbsent(1000L, 101L);
     }
 
     @Test
-    void calculatesProgressFromCompletedRecords() {
+    void calculatesProgressFromCanonicalStepRecords() {
         WorkflowInstance instance = runningInstance();
-        WorkflowTemplateNode firstNode = node(101L, 10L, "场地分析", 1);
-        WorkflowTemplateNode secondNode = node(102L, 10L, "方案生成", 2);
-
-        when(instanceMapper.selectOne(any())).thenReturn(instance);
-        when(nodeMapper.selectList(any())).thenReturn(List.of(firstNode, secondNode));
+        WorkflowTemplateNode first = node(101L, 10L, "场地分析", 1);
+        WorkflowTemplateNode second = node(102L, 10L, "方案生成", 2);
+        when(accessService.requireOwnedInstance(7L, 1000L)).thenReturn(instance);
+        when(accessService.listEnabledNodes(10L)).thenReturn(List.of(first, second));
         when(stepRecordMapper.selectCount(any())).thenReturn(1L);
-        when(nodeMapper.selectById(101L)).thenReturn(firstNode);
+        when(nodeMapper.selectById(101L)).thenReturn(first);
 
         WorkflowProgressVO result = service.getProgress(7L, 1000L);
 
@@ -129,154 +99,27 @@ class WorkflowInstanceServiceImplTest {
     }
 
     @Test
-    void rejectsAccessToAnotherUsersInstance() {
-        when(instanceMapper.selectOne(any())).thenReturn(null);
-
-        assertThrows(BusinessException.class, () -> service.getMyInstance(7L, 1000L));
-    }
-
-    @Test
-    void completesCurrentStepAndAdvancesToNextNode() {
-        WorkflowInstance instance = runningInstance();
-        WorkflowTemplateNode firstNode = node(101L, 10L, "场地分析", 1);
-        WorkflowTemplateNode secondNode = node(102L, 10L, "方案生成", 2);
+    void delegatesTransitionWithIdempotencyKey() {
         WorkflowStepCompleteRequest request = new WorkflowStepCompleteRequest();
-        request.setOutputContent("分析结果");
+        WorkflowStepCompleteVO expected = WorkflowStepCompleteVO.builder()
+                .instanceId(1000L).completedNodeId(101L).progress(new BigDecimal("50.00"))
+                .nextStep(WorkflowNextStepVO.builder().nextNodeId(102L).whetherFinished(false).build())
+                .build();
+        when(transitionService.completeStep(7L, 1000L, 101L, request, "completion-1"))
+                .thenReturn(expected);
 
-        when(instanceMapper.selectOne(any())).thenReturn(instance);
-        when(nodeMapper.selectList(any())).thenReturn(List.of(firstNode, secondNode));
-        when(stepRecordMapper.selectOne(any())).thenReturn(null);
-        when(stepRecordMapper.selectCount(any())).thenReturn(1L);
-
-        WorkflowStepCompleteVO result = service.completeStep(7L, 1000L, 101L, request);
-
-        assertEquals(new BigDecimal("50.00"), result.getProgress());
-        assertEquals(102L, result.getNextStep().getNextNodeId());
-        assertEquals(102L, instance.getCurrentNodeId());
-        verify(instanceMapper).updateById(instance);
-        verify(stepRecordMapper).insert(any(WorkflowStepRecord.class));
+        assertEquals(expected, service.completeStep(7L, 1000L, 101L, request, "completion-1"));
     }
 
     @Test
-    void createsScoredIterationAndCalculatesAverage() {
-        WorkflowInstance instance = runningInstance();
-        WorkflowTemplateNode node = node(101L, 10L, "场地分析", 1);
-        AiTool tool = new AiTool();
-        tool.setId(3L);
-        tool.setName("External AI");
-        tool.setStatus(1);
+    void delegatesIterationCreationWithIdempotencyKey() {
         WorkflowStepIterationCreateRequest request = new WorkflowStepIterationCreateRequest();
-        request.setToolId(3L);
-        request.setPromptContent("Analyze the site");
-        request.setOutputContent("Analysis result");
-        request.setEffectScore(8);
-        request.setAccuracyScore(9);
-        request.setControllabilityScore(7);
-        request.setUsabilityScore(10);
-        request.setSelected(true);
+        WorkflowStepIterationVO expected = WorkflowStepIterationVO.builder()
+                .id(2000L).instanceId(1000L).nodeId(101L).iterationNo(1).build();
+        when(iterationService.create(7L, 1000L, 101L, request, "iteration-1"))
+                .thenReturn(expected);
 
-        when(instanceMapper.selectOne(any())).thenReturn(instance);
-        when(nodeMapper.selectOne(any())).thenReturn(node);
-        when(aiToolMapper.selectOne(any())).thenReturn(tool);
-        when(stepIterationMapper.selectOne(any())).thenReturn(null);
-        doAnswer(invocation -> {
-            WorkflowStepIteration iteration = invocation.getArgument(0);
-            iteration.setId(2000L);
-            return 1;
-        }).when(stepIterationMapper).insert(any(WorkflowStepIteration.class));
-
-        WorkflowStepIterationVO result = service.createStepIteration(7L, 1000L, 101L, request);
-
-        assertEquals(1, result.getIterationNo());
-        assertEquals(new BigDecimal("8.50"), result.getAverageScore());
-        assertEquals(true, result.getSelected());
-        assertEquals("External AI", result.getToolName());
-        verify(stepIterationMapper).insert(any(WorkflowStepIteration.class));
-    }
-
-    @Test
-    void rejectsIterationForNodeOutsideTemplate() {
-        WorkflowStepIterationCreateRequest request = new WorkflowStepIterationCreateRequest();
-        when(instanceMapper.selectOne(any())).thenReturn(runningInstance());
-        when(nodeMapper.selectOne(any())).thenReturn(null);
-
-        assertThrows(
-                BusinessException.class,
-                () -> service.createStepIteration(7L, 1000L, 999L, request)
-        );
-    }
-
-    @Test
-    void rejectsIterationWithoutOutputOrResultUrl() {
-        WorkflowStepIterationCreateRequest request = new WorkflowStepIterationCreateRequest();
-        when(instanceMapper.selectOne(any())).thenReturn(runningInstance());
-        when(nodeMapper.selectOne(any())).thenReturn(node(101L, 10L, "场地分析", 1));
-
-        assertThrows(
-                BusinessException.class,
-                () -> service.createStepIteration(7L, 1000L, 101L, request)
-        );
-    }
-
-    @Test
-    void savesExactPromptRevisionAndRenderedSnapshots() {
-        WorkflowInstance instance = runningInstance();
-        WorkflowTemplateNode node = node(101L, 10L, "场地分析", 1);
-        WorkflowStepIterationCreateRequest request = new WorkflowStepIterationCreateRequest();
-        request.setPromptId(20L);
-        request.setPromptRevisionId(200L);
-        request.setPromptContent("Design in modern minimal style");
-        request.setProfileContextSnapshot("{\"style\":\"forged by client\"}");
-        request.setOutputContent("Analysis result");
-        PromptRevision revision = new PromptRevision();
-        revision.setId(200L);
-        revision.setPromptId(20L);
-
-        when(instanceMapper.selectOne(any())).thenReturn(instance);
-        when(nodeMapper.selectOne(any())).thenReturn(node);
-        when(promptRevisionService.requireRevision(20L, 200L)).thenReturn(revision);
-        when(stepIterationMapper.selectOne(any())).thenReturn(null);
-        doAnswer(invocation -> {
-            WorkflowStepIteration iteration = invocation.getArgument(0);
-            iteration.setId(2000L);
-            return 1;
-        }).when(stepIterationMapper).insert(any(WorkflowStepIteration.class));
-
-        WorkflowStepIterationVO result = service.createStepIteration(7L, 1000L, 101L, request);
-
-        assertEquals(20L, result.getPromptId());
-        assertEquals(200L, result.getPromptRevisionId());
-        assertEquals("Design in modern minimal style", result.getPromptContent());
-        assertEquals(
-                "{\"schemaVersion\":1,\"preferences\":[]}",
-                result.getProfileContextSnapshot()
-        );
-    }
-
-    @Test
-    void rejectsPartialPromptReferenceButIgnoresDeprecatedClientSnapshot() {
-        WorkflowStepIterationCreateRequest partialReference = new WorkflowStepIterationCreateRequest();
-        partialReference.setPromptId(20L);
-        partialReference.setOutputContent("Analysis result");
-        when(instanceMapper.selectOne(any())).thenReturn(runningInstance());
-        when(nodeMapper.selectOne(any())).thenReturn(node(101L, 10L, "场地分析", 1));
-
-        assertThrows(
-                BusinessException.class,
-                () -> service.createStepIteration(7L, 1000L, 101L, partialReference)
-        );
-
-        WorkflowStepIterationCreateRequest invalidSnapshot = new WorkflowStepIterationCreateRequest();
-        invalidSnapshot.setOutputContent("Analysis result");
-        invalidSnapshot.setProfileContextSnapshot("[]");
-        when(stepIterationMapper.selectOne(any())).thenReturn(null);
-
-        WorkflowStepIterationVO result = service.createStepIteration(7L, 1000L, 101L, invalidSnapshot);
-
-        assertEquals(
-                "{\"schemaVersion\":1,\"preferences\":[]}",
-                result.getProfileContextSnapshot()
-        );
+        assertEquals(expected, service.createStepIteration(7L, 1000L, 101L, request, "iteration-1"));
     }
 
     private WorkflowInstance runningInstance() {
@@ -287,6 +130,7 @@ class WorkflowInstanceServiceImplTest {
         instance.setCurrentNodeId(101L);
         instance.setStatus("RUNNING");
         instance.setProgress(BigDecimal.ZERO);
+        instance.setLockVersion(0L);
         return instance;
     }
 

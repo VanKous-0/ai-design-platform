@@ -73,7 +73,7 @@ class PromptRevisionServiceImplTest {
         assertEquals(2, new ObjectMapper().readTree(v2.getParameterSchemaJson()).size());
         assertEquals(v2.getId(), prompt.getCurrentRevisionId());
 
-        when(revisionMapper.selectOne(any())).thenReturn(v1);
+        when(revisionMapper.selectById(v1.getId())).thenReturn(v1);
         PromptRenderVO historicalRender = service.render(prompt, v1.getId(), Map.of("style", "minimal"));
 
         assertEquals(v1.getId(), historicalRender.getPromptRevisionId());

@@ -37,7 +37,8 @@ class SecurityIntegrationTest {
     void protectedEndpointRequiresAuthentication() throws Exception {
         mockMvc.perform(get("/api/user/me"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value(401));
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
     }
 
     @Test
@@ -52,7 +53,8 @@ class SecurityIntegrationTest {
         mockMvc.perform(get("/api/user/me")
                         .header("Authorization", "Bearer invalid-token"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value(401));
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
     }
 
     @Test
@@ -67,7 +69,8 @@ class SecurityIntegrationTest {
         mockMvc.perform(get("/api/admin/statistics/workflow-summary")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value(403));
+                .andExpect(jsonPath("$.code").value(403))
+                .andExpect(jsonPath("$.errorCode").value("FORBIDDEN"));
     }
 
     @Test
@@ -82,7 +85,8 @@ class SecurityIntegrationTest {
         mockMvc.perform(get("/api/user/me")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value(401));
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
     }
 
     @Test
@@ -98,6 +102,7 @@ class SecurityIntegrationTest {
                                 }
                                 """.formatted(oversizedScene)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(40001));
+                .andExpect(jsonPath("$.code").value(40001))
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
     }
 }
