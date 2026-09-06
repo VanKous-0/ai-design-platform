@@ -18,6 +18,7 @@ import com.project.modules.prompt.service.PromptRevisionService;
 import com.project.modules.prompt.vo.PromptRenderVO;
 import com.project.modules.prompt.vo.PromptRevisionVO;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -50,6 +51,7 @@ public class PromptRevisionServiceImpl implements PromptRevisionService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public PromptRevision createRevision(PromptTemplate prompt, Long createdBy) {
         List<PromptParameterSnapshot> parameterSchema = parameterMapper.selectList(
                         new LambdaQueryWrapper<PromptParameter>()
