@@ -78,6 +78,13 @@ authenticated `render_prompt` event for a Prompt with administrator-declared
 unmapped events remain statistics-only. The event insert and aggregate update
 share one transaction.
 
+Critical retryable writes accept an optional `Idempotency-Key` header. It is
+supported by usage-event creation, workflow-step completion, and workflow
+iteration creation. Reusing the same key with the same normalized request
+returns the original result; reusing it with different input returns HTTP 409.
+Omitting the header preserves the original behavior and represents a new user
+operation.
+
 ## External AI result iterations
 
 The backend does not call external AI APIs. Authenticated users can record and compare results produced in external tools:
@@ -90,6 +97,14 @@ An iteration records the tool, prompt, server-built profile context snapshot,
 output or result URL, effect, accuracy, controllability, usability, and the next
 improvement note. The deprecated client profile snapshot field is ignored. Only
 one iteration per workflow node is selected as the final result.
+
+The canonical selection and next iteration number live on a database-locked
+per-node runtime row. Workflow step completion uses a compare-and-swap update,
+so concurrent completion of the same current node advances the instance once.
+
+Failure responses retain the existing numeric `code`, `message`, and `data`
+shape and add a stable `errorCode` such as `WORKFLOW_STATE_CONFLICT` or
+`PROMPT_NOT_FOUND`. HTTP status is authoritative (400, 401, 403, 404, or 409).
 
 ## Flyway schema source of truth
 
